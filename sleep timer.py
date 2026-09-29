@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication,
                                QGraphicsOpacityEffect, QLabel, QLayout, QMenu, QPushButton,
                                QSizePolicy,
                                QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 # Fixed-size window: width is set here, height follows the content (no user resizing).
 WIN_W, MARGIN = 390, 22
@@ -106,7 +107,7 @@ QMenu::separator { height: 1px; background: %(border)s; margin: 4px 8px; }
 """ % dict(bg=BG, surface=SURFACE, surface2=SURFACE2, border=BORDER, matcha=MATCHA,
            matcha_hi=MATCHA_HI, text=TEXT, second=SECOND, faint=FAINT,
            disabled=DISABLED, danger=DANGER, danger_hi=DANGER_HI)
-
+SERVER_NAME = "SleepTimerSingleInstance"
 
 # ---- helpers ------------------------------------------------------------
 def keep_awake(on):
@@ -118,6 +119,37 @@ def keep_awake(on):
     except Exception:
         pass
 
+
+
+def is_already_running() -> bool:
+    """Try to connect to an existing instance. Returns True if one is running."""
+    socket = QLocalSocket()
+    socket.connectToServer(SERVER_NAME)
+    if socket.waitForConnected(300):
+        # Tell the existing instance to show itself
+        socket.write(b"show")
+        socket.flush()
+        socket.waitForBytesWritten(300)
+        socket.disconnectFromServer()
+        return True
+    return False
+
+
+def start_single_instance_server(window):
+    """Start a local server so new instances can ask us to show the window."""
+    server = QLocalServer()
+    # Remove any leftover server from a previous crash
+    QLocalServer.removeServer(SERVER_NAME)
+    if server.listen(SERVER_NAME):
+        def on_new_connection():
+            sock = server.nextPendingConnection()
+            if sock:
+                sock.waitForReadyRead(500)
+                window.show_window()          # ← this is the important call
+                sock.disconnectFromServer()
+        server.newConnection.connect(on_new_connection)
+        # Keep a reference so it isn’t garbage-collected
+        window._single_instance_server = server
 
 def dark_titlebar(widget):
     """Dark title bar on Windows 10/11 so the window frame matches the UI."""
@@ -1013,6 +1045,36 @@ class SleepTimer(QWidget):
         self.raise_()
         self.activateWindow()
 
+        try:
+            hwnd = int(self.winId())
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+
+            # Get thread IDs
+            foreground = user32.GetForegroundWindow()
+            current_thread = kernel32.GetCurrentThreadId()
+            foreground_thread = user32.GetWindowThreadProcessId(foreground, None)
+
+            # Attach to the foreground thread so we are allowed to set focus
+            if foreground_thread != current_thread:
+                user32.AttachThreadInput(foreground_thread, current_thread, True)
+
+            user32.ShowWindow(hwnd, 9)               # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+            user32.BringWindowToTop(hwnd)
+            user32.SetActiveWindow(hwnd)
+            user32.SetFocus(hwnd)
+
+            # Temporary topmost (extra insurance)
+            user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0003 | 0x0001 | 0x0020)
+            user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0003 | 0x0001 | 0x0020)
+
+            if foreground_thread != current_thread:
+                user32.AttachThreadInput(foreground_thread, current_thread, False)
+
+        except Exception:
+            pass
+
     def on_tray(self, reason):
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
             self.show_window()
@@ -1041,18 +1103,23 @@ class SleepTimer(QWidget):
             self.tray.hide()
         e.accept()
         QApplication.quit()
+        
 
 
 if __name__ == "__main__":
+    # If another instance is already running → ask it to show and exit
+    if is_already_running():
+        sys.exit(0)
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
     start_in_tray = "--tray" in sys.argv or "--minimized" in sys.argv
 
     w = SleepTimer()
+    start_single_instance_server(w)          # ← start listening
 
     if start_in_tray:
-        # launched from Windows startup → only tray icon
         if w.tray:
             w.tray.show()
             w.update_tray(w.remaining, "")
