@@ -116,6 +116,16 @@ namespace SleepTimer
                         new IntPtr(5 | (4 << 8) | (120 << 16))); pump(50);
                     Check(wheel == 240 && modifiers == ModifierKeys.Shift, "Native modifier routing changed");
 
+                    Console.WriteLine("CHECK: stale native failure during helper replacement");
+                    host.GetType().GetMethod("Fail", Fields).Invoke(host, new object[] { "Replacement race probe" });
+                    widget.GetType().GetField("native", Fields).SetValue(widget, null); // Explorer temporarily has no taskbar.
+                    pump(50); // A queued callback from the removed helper must not dereference the cleared field.
+                    widget.GetType().GetField("nativeAttempted", Fields).SetValue(widget, false);
+                    widget.GetType().GetMethod("EnsureNative", Fields).Invoke(widget, null);
+                    Until(() => widget.RendererDescription == "Native", pump, "Replacement helper was changed by an old exit callback");
+                    host = Field<NativeTaskbarHost>(widget, "native");
+                    Check(!Field<bool>(widget, "nativeFailed"), "Old helper failure marked the replacement as failed");
+
                     int id = Field<Process>(host, "process").Id;
                     using (var process = Process.GetProcessById(id)) process.Kill();
                     Until(() => widget.RendererDescription == "WPF fallback" && widget.IsVisible, pump,

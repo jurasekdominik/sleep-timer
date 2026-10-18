@@ -152,6 +152,11 @@ namespace SleepTimer
         {
             uint process = TaskbarLocator.ExplorerProcess();
             if (process == explorerProcess && (process == 0 || taskbarHook != IntPtr.Zero)) return;
+            if (parentOverride == IntPtr.Zero && process != explorerProcess)
+            {
+                native?.Dispose(); native = null;
+                nativeAttempted = nativeFailed = false;
+            }
             if (taskbarHook != IntPtr.Zero) UnhookWinEvent(taskbarHook);
             explorerProcess = process;
             // Filter in Windows so activity in other applications does not wake this widget.
@@ -261,12 +266,15 @@ namespace SleepTimer
             if (parent == IntPtr.Zero || (nativeAttempted && nativeParent == parent && nativeParentProcess == process)) return;
             native?.Dispose(); nativeParent = parent; nativeParentProcess = process;
             nativeAttempted = true; nativeFailed = false;
-            native = new NativeTaskbarHost(source.Handle, parent, () =>
+            NativeTaskbarHost created = null;
+            created = new NativeTaskbarHost(source.Handle, parent, () =>
             {
-                if (disposed) return;
-                nativeFailed = native.Failure != null;
+                // A previous helper can finish exiting after Explorer or the renderer is replaced.
+                if (disposed || native != created) return;
+                nativeFailed = created.Failure != null;
                 RefreshTaskbarLayer();
             }, toggle, cancel, menu, open, scroll);
+            native = created;
             if (!native.Start()) { nativeFailed = true; native.Dispose(); }
         }
         bool SyncNative(bool visible)
