@@ -459,7 +459,7 @@ namespace SleepTimer
             g.DrawDrawing(dialArtwork);
             double shown = TimerDial.ArcFraction(Position);
             if (shown > .000001) DrawArc(g, center, radius, -90, shown * 360, progressPen);
-            double hours = Math.Max(0, Position / 3600);
+            double hours = TimerDial.HourFill(Position);
             int whole = Math.Min(24, (int)hours);
             if (completeHourCount != whole)
             {

@@ -35,28 +35,15 @@ class Checks
     }
     static void Main()
     {
-        foreach (double seconds in new[] { 0d, 1, 60, 1800, 3599, 3600, 3600.1, 3601, 5400, 7200, 9000, 43200, 86400 })
-        {
-            var dial = TimerDial.For(seconds);
-            Equal(dial.Seconds, 3600, "always one hour");
-            Equal(dial.Ticks, 60, "always minute ticks");
-            Equal((dial.ExtraHours + dial.Fraction(seconds)) * 3600, seconds, "hours and arc reconstruct countdown");
-        }
-        Equal(TimerDial.For(9000).ExtraHours, 2, "2h30 extra marks");
-        Equal(TimerDial.For(9000).Fraction(9000), .5, "2h30 half ring");
-        Equal(TimerDial.For(7200).ExtraHours, 1, "exact 2h keeps one additional hour");
-        Equal(TimerDial.For(7200).Fraction(7200), 1, "exact 2h full ring");
-        Equal(TimerDial.For(7201).ExtraHours, 2, "before hourly rollover");
-        Equal(TimerDial.For(7199).ExtraHours, 1, "after hourly rollover");
-        Equal(TimerDial.For(7199).Fraction(7199), 3599d / 3600, "rollover refills ring");
-        Equal(TimerDial.For(-1).Fraction(-1), 0, "expired arc");
-        Equal(TimerDial.For(86400).ExtraHours, 23, "24h represented by 23 marks and full ring");
+        Equal(TimerDial.ArcFraction(9000), .5, "2h30 half ring");
+        Equal(TimerDial.ArcFraction(7199), 3599d / 3600, "rollover refills ring");
+        Equal(TimerDial.ArcFraction(-1), 0, "expired arc");
         double now = 0;
         var timer = new Countdown(7200, () => now);
         timer.Start(timer.Duration);
         now = 1800;
-        Equal(TimerDial.For(timer.Remaining).ExtraHours, 1, "running hour marks");
-        Equal(TimerDial.For(timer.Remaining).Fraction(timer.Remaining), .5, "running minute position");
+        Equal(TimerDial.HourFill(timer.Remaining), 1.5, "running hour marks");
+        Equal(TimerDial.ArcFraction(timer.Remaining), .5, "running minute position");
         timer.Pause(); now += 60;
         Equal(timer.Remaining, 5400, "paused position");
         timer.Resume(); now += 60;
@@ -203,17 +190,14 @@ class Checks
         timer = new Countdown(7200, () => now);
         timer.Start(timer.Duration);
         timer.Adjust(-5400);
-        var editedDial = TimerDial.For(timer.Remaining);
-        Equal(editedDial.ExtraHours, 0, "manual decrease removes hour marks");
-        Equal(editedDial.Fraction(timer.Remaining), .5, "manual decrease moves minute arc");
+        Equal(TimerDial.HourFill(timer.Remaining), .5, "manual decrease removes hour marks");
+        Equal(TimerDial.ArcFraction(timer.Remaining), .5, "manual decrease moves minute arc");
         now += 60;
-        Equal(editedDial.Seconds, 3600, "normal countdown keeps hourly dial");
         timer.Adjust(7200);
-        editedDial = TimerDial.For(timer.Remaining);
-        Equal(editedDial.ExtraHours, 2, "manual increase adds hour marks");
+        Equal(TimerDial.HourFill(timer.Remaining), 8940d / 3600, "manual increase adds hour marks");
         timer.Pause();
         timer.Adjust(43200);
-        Equal(TimerDial.For(timer.Remaining).ExtraHours, 14, "paused editing adds hour marks");
+        Equal(TimerDial.HourFill(timer.Remaining), 52140d / 3600, "paused editing adds hour marks");
         timer.Reset(); timer.SetDuration(180 * 60); timer.Start(timer.Duration);
         Equal(timer.Remaining, 10800, "quick timer replaces active countdown");
         Equal((int)timer.State, (int)TimerState.Running, "quick timer runs immediately");
@@ -231,19 +215,21 @@ class Checks
         Equal(TimerStatus.Complete(0), 100, "finished completion");
         Equal(TimerStatus.Complete(1.5), 0, "bounded completion");
         Equal(TimerStatus.Complete(-.5), 100, "bounded expiration completion");
-        Equal(TimerDial.For(9000).HourFill, 2.5, "2h30 last hour half faded");
-        Equal(TimerDial.For(10800).HourFill, 3, "3h all hour segments full");
-        Equal(TimerDial.For(7200).HourFill, 2, "2h two segments full at rollover");
-        Equal(TimerDial.For(5400).HourFill, 1.5, "1h30 second hour half faded");
-        Equal(TimerDial.For(3600).HourFill, 1, "first hour included");
-        Equal(TimerDial.For(1800).HourFill, .5, "first hour half faded");
-        Equal(TimerDial.For(86400).HourFill, 24, "24h fills inner circle");
-        Equal(TimerDial.For(0).HourFill, 0, "expired hour blocks");
-        if (TimerDial.For(7201).HourFill <= TimerDial.For(7200).HourFill || TimerDial.For(7200).HourFill <= TimerDial.For(7199).HourFill)
+        Equal(TimerDial.HourFill(9000), 2.5, "2h30 last hour half faded");
+        Equal(TimerDial.HourFill(10800), 3, "3h all hour segments full");
+        Equal(TimerDial.HourFill(7200), 2, "2h two segments full at rollover");
+        Equal(TimerDial.HourFill(5400), 1.5, "1h30 second hour half faded");
+        Equal(TimerDial.HourFill(3600), 1, "first hour included");
+        Equal(TimerDial.HourFill(1800), .5, "first hour half faded");
+        Equal(TimerDial.HourFill(86400), 24, "24h fills inner circle");
+        Equal(TimerDial.HourFill(0), 0, "expired hour blocks");
+        Equal(TimerDial.HourFill(-1), 0, "negative hour blocks");
+        Equal(TimerDial.HourFill(90000), 24, "maximum hour blocks");
+        if (TimerDial.HourFill(7201) <= TimerDial.HourFill(7200) || TimerDial.HourFill(7200) <= TimerDial.HourFill(7199))
             throw new Exception("hour fading must decrease continuously across rollover");
         checks++;
-        Equal(TimerDial.For(1800.25).Fraction(1800.25), 1800.25 / 3600, "subsecond arc progress");
-        if (TimerDial.For(7200.25).HourFill <= TimerDial.For(7200.1).HourFill)
+        Equal(TimerDial.ArcFraction(1800.25), 1800.25 / 3600, "subsecond arc progress");
+        if (TimerDial.HourFill(7200.25) <= TimerDial.HourFill(7200.1))
             throw new Exception("hour fading needs continuous subsecond progress");
         checks++;
         Equal(TimerDial.ArcFraction(3600), 1, "exact hour draws full ring");
