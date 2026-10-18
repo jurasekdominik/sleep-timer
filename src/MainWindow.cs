@@ -157,6 +157,9 @@ namespace SleepTimer
                 RegisterShortcuts();
             };
             IsVisibleChanged += (s, e) => UpdateView();
+            // Child visibility propagates after the window event. Start/stop dial clocks
+            // when the face itself becomes visible, including returning from Settings.
+            face.IsVisibleChanged += (s, e) => UpdateView();
             StateChanged += (s, e) => { if (WindowState == WindowState.Minimized) Hide(); };
             Closing += (s, e) =>
             {

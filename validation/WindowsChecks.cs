@@ -456,8 +456,9 @@ namespace SleepTimer
                 Call(window, "SetAwake", 0); Call(window, "StartPause");
                 Check(ticker.IsEnabled && ticker.Interval == TimeSpan.FromSeconds(1), "Hidden countdown must update once a second");
                 window.Show();
-                Check(ticker.Interval == TimeSpan.FromSeconds(1) && Field<TimerFace>(window, "face").HasAnimatedProperties,
-                    "Visible countdown must animate independently of the once-a-second status timer");
+                Check(ticker.Interval == TimeSpan.FromSeconds(1), "Visible status timer must still update once a second");
+                PumpUntil(() => Field<TimerFace>(window, "face").HasAnimatedProperties, 250,
+                    "Restoring the window did not start the dial clocks before the next status tick");
                 window.Hide(); Call(window, "StartPause");
                 Check(!ticker.IsEnabled && countdown.State == TimerState.Paused, "Paused hidden app must stop status polling");
                 Check(!Field<TimerFace>(window, "face").HasAnimatedProperties, "Hidden face retained its animation clocks");
