@@ -652,7 +652,7 @@ namespace SleepTimer
                         Check(visual.Title == Field<TimerFace>(visual, "face").Time, "Hidden thumbnail title is not compact");
                         visual.Show(); countdown.Reset(); Call(visual, "UpdateView", false); Pump(50);
                         Check(visual.Title.Contains("Ready"), "Ready state missing from visible title");
-                        Check(Program.Version == "1.2", "Release version is not 1.2");
+                        Check(Program.Version == "1.3", "Release version is not 1.3");
                         Check(((FrameworkElement)visual.Content).ActualHeight >= 508, "Client area clips the footer");
                         Console.WriteLine("CHECK: font families and weights");
                         Check(AppFonts.All.Length >= 6 && AppFonts.All.Select(font => font.Key).Distinct().Count() == AppFonts.All.Length,
