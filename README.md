@@ -50,6 +50,10 @@ Install .NET SDK 8 and run `build.cmd`. It creates `SleepTimer.exe` in the proje
 
 To include the native taskbar timer, install Visual Studio C++ build tools, the Windows SDK and CMake, then run `build.cmd --native`. The portable executable includes the helper; users do not need those build tools. See [native taskbar development](docs/NATIVE_TASKBAR.md).
 
+## Credits
+
+Taskbar integration was inspired by [TaskbarWidgets](https://github.com/pfcdev/TaskbarWidgets). Sleep Timer uses its own native renderer.
+
 ## License
 
 [MIT](LICENSE) · Dominik Jurásek
