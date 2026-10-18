@@ -403,6 +403,9 @@ namespace SleepTimer
         void AnimateCountdown(DependencyProperty property, double seconds, int editMilliseconds)
         {
             double from = (double)GetValue(property);
+            // WPF can retain a replaced clock's snapshot until its first tick. Seed the new
+            // deadline now so instant edits and clock corrections never expose the old value.
+            SetPosition(property, seconds);
             var countdown = new DoubleAnimation(seconds, 0, TimeSpan.FromSeconds(seconds));
             // One revolution per hour moves only 0.025 pixels per frame at 10 Hz.
             // Scroll/edit easing retains the full display frame rate, independently of steady ticking.
