@@ -17,11 +17,12 @@ namespace SleepTimer
         readonly Border button;
         readonly TextBlock time = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 12, FontWeight = FontWeights.SemiBold };
         readonly TextBlock action = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 11, FontWeight = FontWeights.Normal };
-        readonly MiniRing ring = new MiniRing { Width = 22, Height = 22, Margin = new Thickness(0, 0, 6, 0) };
+        readonly MiniRing ring = new MiniRing { Width = 28, Height = 28, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
         readonly DispatcherTimer placement = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         readonly Func<int, int, PixelRectangle?> locate;
         readonly Func<PixelRectangle, bool> canShow;
         readonly Stopwatch probeAge = new Stopwatch();
+        readonly Stopwatch settleAge = new Stopwatch();
         Task<PixelRectangle?> probe;
         HwndSource source;
         readonly WinEventProc foregroundChanged;
@@ -29,6 +30,8 @@ namespace SleepTimer
         bool disposed;
         string viewKey;
         PixelRectangle? previous;
+        PixelRectangle? pending;
+        bool waitingForLayout = true;
         [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr window, int index);
         [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr window, int index, int value);
         [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
@@ -39,12 +42,13 @@ namespace SleepTimer
             WinEventProc callback, uint process, uint thread, uint flags);
         [DllImport("user32.dll")] static extern bool UnhookWinEvent(IntPtr hook);
 
-        public TaskbarTimer(Action toggle, Action menu, Func<int, int, PixelRectangle?> locate = null,
+        public TaskbarTimer(Action toggle, Action cancel, Action menu, Action<int, ModifierKeys> scroll,
+            Func<int, int, PixelRectangle?> locate = null,
             Func<PixelRectangle, bool> canShow = null)
         {
             this.locate = locate ?? TaskbarLocator.Locate;
             this.canShow = canShow ?? TaskbarLocator.CanShow;
-            Title = "Sleep Timer · taskbar timer"; Width = 124; Height = 32;
+            Title = "Sleep Timer · taskbar timer"; Width = 140; Height = 34;
             WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize;
             ShowInTaskbar = ShowActivated = false; AllowsTransparency = true; Background = Brushes.Transparent;
             UseLayoutRounding = SnapsToDevicePixels = true;
@@ -56,17 +60,21 @@ namespace SleepTimer
             var content = new Grid(); content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             content.ColumnDefinitions.Add(new ColumnDefinition()); content.Children.Add(ring);
             Grid.SetColumn(text, 1); content.Children.Add(text);
-            button = new Border { Child = content, Background = Brushes.Transparent,
+            // Alpha 1 looks transparent while preserving native hit testing over the entire rectangle.
+            button = new Border { Child = content, Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)),
                 Padding = new Thickness(5, 0, 5, 0), Cursor = Cursors.Hand };
             time.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
             action.SetResourceReference(TextBlock.ForegroundProperty, "SecondBrush");
             Content = button;
             button.MouseLeftButtonUp += (s, e) => { toggle(); e.Handled = true; };
-            button.MouseRightButtonUp += (s, e) =>
+            button.MouseRightButtonUp += (s, e) => { cancel(); e.Handled = true; };
+            button.MouseUp += (s, e) =>
             {
+                if (e.ChangedButton != MouseButton.Middle) return;
                 Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() => { if (!disposed) menu(); }));
                 e.Handled = true;
             };
+            button.MouseWheel += (s, e) => { scroll(e.Delta, Keyboard.Modifiers); e.Handled = true; };
             SourceInitialized += (s, e) =>
             {
                 source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
@@ -76,8 +84,14 @@ namespace SleepTimer
             };
             foregroundChanged = (hook, message, window, objectId, childId, thread, stamp) =>
             {
-                if (!disposed)
-                    Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)RefreshTaskbarLayer);
+                if (!disposed) Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() =>
+                {
+                    if (disposed) return;
+                    RefreshTaskbarLayer();
+                    var at = pending ?? previous;
+                    if (waitingForLayout && probe == null && at.HasValue && canShow(at.Value)) probeAge.Reset();
+                    RefreshPlacement();
+                }));
             };
             // Follow both taskbar activation and games becoming foreground, without taking focus.
             foregroundHook = SetWinEventHook(3, 3, IntPtr.Zero, foregroundChanged, 0, 0, 2);
@@ -106,30 +120,43 @@ namespace SleepTimer
                 if (!probe.IsCompleted)
                 {
                     // Never accumulate stuck accessibility calls, or keep stale coordinates visible.
-                    if (probeAge.ElapsedMilliseconds > 1500) { Hide(); previous = null; }
+                    if (probeAge.ElapsedMilliseconds > 1500) { Hide(); previous = pending = null; waitingForLayout = true; }
                     return;
                 }
                 var bounds = probe.Status == TaskStatus.RanToCompletion ? probe.Result : null;
                 if (probe.IsFaulted) { var ignored = probe.Exception; }
                 probe = null;
-                if (!bounds.HasValue) { Hide(); previous = null; }
-                else if (previous != bounds)
+                if (!bounds.HasValue) { Hide(); previous = pending = null; waitingForLayout = true; }
+                else if (!canShow(bounds.Value))
                 {
-                    var at = bounds.Value;
-                    SetWindowPos(source.Handle, IntPtr.Zero, at.X, at.Y, at.Width, at.Height, 0x0214); // retain layer
-                    previous = at;
+                    Hide(); previous = bounds; pending = null; waitingForLayout = true;
+                }
+                else if (waitingForLayout || previous != bounds)
+                {
+                    if (pending != bounds)
+                    {
+                        Hide(); waitingForLayout = true; pending = bounds; settleAge.Restart();
+                    }
+                    else if (settleAge.ElapsedMilliseconds >= 300)
+                    {
+                        var at = bounds.Value;
+                        SetWindowPos(source.Handle, IntPtr.Zero, at.X, at.Y, at.Width, at.Height, 0x0214);
+                        previous = at; pending = null; waitingForLayout = false;
+                    }
                 }
                 RefreshTaskbarLayer();
             }
-            if (probeAge.IsRunning && probeAge.ElapsedMilliseconds < 1000) return;
+            if (probeAge.IsRunning && probeAge.ElapsedMilliseconds < (pending.HasValue ? 200 : 1000)) return;
             int width = (int)Width, height = (int)Height;
             probeAge.Restart(); probe = Task.Run(() => locate(width, height));
         }
 
         void RefreshTaskbarLayer()
         {
-            if (disposed || !previous.HasValue) return;
-            if (!canShow(previous.Value)) { Hide(); return; }
+            var candidate = pending ?? previous;
+            if (disposed || !candidate.HasValue) return;
+            if (!canShow(candidate.Value)) { Hide(); waitingForLayout = true; pending = null; return; }
+            if (waitingForLayout) return;
             if (!IsVisible)
             {
                 Show();
@@ -152,9 +179,11 @@ namespace SleepTimer
         {
             string key = value + "|" + actionLabel + "|" + state + "|" + Math.Round(fraction * 100) + "|" + tone + "|" + Theme.Accent;
             if (viewKey == key) return; viewKey = key;
-            time.Text = value; action.Text = actionLabel;
+            time.Text = value;
+            time.SetResourceReference(TextBlock.ForegroundProperty, state == TimerState.Idle ? "SecondBrush" : "TextBrush");
+            action.Text = actionLabel + (state == TimerState.Idle ? " · Ready" : state == TimerState.Paused ? " · Paused" : "");
             button.ToolTip = value + " · " + actionLabel + " · " + (state == TimerState.Idle ? "Ready" : state.ToString())
-                + "\nClick to start or pause · Right-click for options";
+                + "\nClick to start or pause · Right-click to cancel · Scroll to adjust · Middle-click for menu";
             ring.Fraction = fraction; ring.State = state; ring.Tone = tone; ring.InvalidateVisual();
         }
 
@@ -167,27 +196,27 @@ namespace SleepTimer
             public TimerTone Tone;
             protected override void OnRender(DrawingContext drawing)
             {
-                var center = new Point(11, 11);
-                drawing.DrawEllipse(null, new Pen(Theme.Brush(Theme.Border), 2), center, 9, 9);
-                var pen = new Pen(Theme.Brush(Theme.TimerColor(Tone)), 2);
+                var center = new Point(14, 14);
+                drawing.DrawEllipse(null, new Pen(Theme.Brush(Theme.Border), 3), center, 11.5, 11.5);
+                var pen = new Pen(Theme.Brush(Theme.TimerColor(Tone)), 3);
                 double fraction = Math.Max(0, Math.Min(1, Fraction));
-                if (fraction >= .999) drawing.DrawEllipse(null, pen, center, 9, 9);
+                if (fraction >= .999) drawing.DrawEllipse(null, pen, center, 11.5, 11.5);
                 else if (fraction > 0)
                 {
                     double angle = fraction * 2 * Math.PI;
                     var arc = new StreamGeometry();
                     using (var path = arc.Open())
                     {
-                        path.BeginFigure(new Point(11, 2), false, false);
-                        path.ArcTo(new Point(11 + 9 * Math.Sin(angle), 11 - 9 * Math.Cos(angle)),
-                            new Size(9, 9), 0, fraction > .5, SweepDirection.Clockwise, true, false);
+                        path.BeginFigure(new Point(14, 2.5), false, false);
+                        path.ArcTo(new Point(14 + 11.5 * Math.Sin(angle), 14 - 11.5 * Math.Cos(angle)),
+                            new Size(11.5, 11.5), 0, fraction > .5, SweepDirection.Clockwise, true, false);
                     }
                     arc.Freeze(); drawing.DrawGeometry(null, pen, arc);
                 }
                 if (State == TimerState.Paused)
                 {
-                    drawing.DrawLine(pen, new Point(9, 7), new Point(9, 15));
-                    drawing.DrawLine(pen, new Point(13, 7), new Point(13, 15));
+                    drawing.DrawLine(pen, new Point(11.5, 9), new Point(11.5, 19));
+                    drawing.DrawLine(pen, new Point(16.5, 9), new Point(16.5, 19));
                 }
             }
         }

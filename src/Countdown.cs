@@ -10,43 +10,68 @@ namespace SleepTimer
         public const int MinSet = 60, MaxSet = 24 * 3600, MinActive = 10, DefaultSeconds = 30 * 60;
 
         readonly Func<double> now;
+        readonly Func<DateTimeOffset> wallNow;
+        TimeZoneInfo targetZone;
         double end, remaining;
 
-        public Countdown(int duration, Func<double> now)
+        public Countdown(int duration, Func<double> now, Func<DateTimeOffset> wallNow = null)
         {
             this.now = now;
+            this.wallNow = wallNow ?? (() => DateTimeOffset.Now);
             Duration = Clamp(duration, MinSet, MaxSet);
             Total = remaining = Duration;
         }
 
         public TimerState State { get; private set; }
         public int Duration { get; private set; }
+        public DateTimeOffset? TargetTime { get; private set; }
         public double Total { get; private set; }
-        public double Remaining => State == TimerState.Running ? end - now() : remaining;
+        public double Remaining => State == TimerState.Running
+            ? TargetTime.HasValue ? (TargetTime.Value - wallNow()).TotalSeconds : end - now() : remaining;
         public double Fraction => Math.Max(0, Math.Min(1, Remaining / Total));
         public bool Expired => State == TimerState.Running && Remaining <= 0;
 
         public void SetDuration(int seconds)
         {
             if (State != TimerState.Idle) return;
+            TargetTime = null;
             Duration = Clamp(seconds, MinSet, MaxSet);
             Total = remaining = Duration;
         }
 
         public void Start(double seconds)
         {
+            TargetTime = null;
             Total = remaining = seconds;
+            Resume();
+        }
+
+        public void StartAt(DateTimeOffset target, TimeZoneInfo zone)
+        {
+            TargetTime = target; targetZone = zone;
+            Total = remaining = Math.Max(0, (target - wallNow()).TotalSeconds);
             Resume();
         }
 
         public void Pause()
         {
-            remaining = end - now();
+            remaining = Remaining;
             State = TimerState.Paused;
         }
 
         public void Resume()
         {
+            if (TargetTime.HasValue)
+            {
+                var wall = wallNow();
+                if (TargetTime.Value <= wall)
+                {
+                    var local = TimeZoneInfo.ConvertTime(TargetTime.Value, targetZone);
+                    TargetTime = TimeText.NextOccurrence(wall, local.Hour * 60 + local.Minute, targetZone);
+                }
+                remaining = (TargetTime.Value - wall).TotalSeconds;
+                Total = Math.Max(Total, remaining);
+            }
             end = now() + remaining;
             State = TimerState.Running;
         }
@@ -54,6 +79,7 @@ namespace SleepTimer
         public void Reset()
         {
             State = TimerState.Idle;
+            TargetTime = null;
             Total = remaining = Duration;
         }
 
@@ -63,7 +89,9 @@ namespace SleepTimer
         /// </summary>
         public void Adjust(double delta)
         {
-            remaining = Math.Min(MaxSet, Math.Max(MinActive, Remaining + delta));
+            double current = Remaining;
+            remaining = Math.Min(MaxSet, Math.Max(MinActive, current + delta));
+            if (TargetTime.HasValue) TargetTime = TargetTime.Value.AddSeconds(remaining - current);
             Total = Math.Max(Total, remaining);
             if (State == TimerState.Running) end = now() + remaining;
         }

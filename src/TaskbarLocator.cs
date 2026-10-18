@@ -9,6 +9,8 @@ namespace SleepTimer
 {
     static class TaskbarLocator
     {
+        static uint lastForegroundProcess;
+        static bool shellOverlay;
         [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom;
             public Rectangle Value => Rectangle.FromLTRB(Left, Top, Right, Bottom); }
         [StructLayout(LayoutKind.Sequential)] struct MonitorInfo { public int Size; public Rect Bounds, Work; public uint Flags; }
@@ -41,7 +43,7 @@ namespace SleepTimer
                     new OrCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
                         new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)));
                 var occupied = new List<Rectangle>();
-                Rectangle? anchor = null;
+                Rectangle? overflow = null;
                 foreach (AutomationElement button in buttons)
                 {
                     var current = button.Current;
@@ -49,21 +51,22 @@ namespace SleepTimer
                     var bounds = Pixels(current.BoundingRectangle);
                     occupied.Add(bounds);
                     // Locale-independent Windows 11 overflow-button identifier.
-                    if (current.AutomationId == "SystemTray.OverflowButton") anchor = bounds;
+                    if (current.AutomationId == "SystemTray.OverflowButton" || current.ClassName == "SystemTray.OverflowButton") overflow = bounds;
                 }
-                if (!anchor.HasValue)
+                // Use one consistent outer notification-area edge. Switching between a
+                // transient chevron and its parent caused jumps when the DND bell appeared.
+                Rectangle? anchor = null;
+                var tray = FindWindowEx(bar, IntPtr.Zero, "TrayNotifyWnd", null);
+                if (tray != IntPtr.Zero && GetWindowRect(tray, out var trayRect) && trayRect.Value.Width > 0)
+                    anchor = trayRect.Value;
+                else
                 {
-                    // Windows 10 and Windows 11 builds retaining the native notification-area window.
-                    var tray = FindWindowEx(bar, IntPtr.Zero, "TrayNotifyWnd", null);
-                    if (tray != IntPtr.Zero && GetWindowRect(tray, out var trayRect)) anchor = trayRect.Value;
-                    else
-                    {
-                        var frame = root.FindFirst(TreeScope.Descendants,
-                            new PropertyCondition(AutomationElement.ClassNameProperty, "SystemTray.SystemTrayFrame"));
-                        if (frame != null && !frame.Current.IsOffscreen && !frame.Current.BoundingRectangle.IsEmpty)
-                            anchor = Pixels(frame.Current.BoundingRectangle);
-                    }
+                    var frame = root.FindFirst(TreeScope.Descendants,
+                        new PropertyCondition(AutomationElement.ClassNameProperty, "SystemTray.SystemTrayFrame"));
+                    if (frame != null && !frame.Current.IsOffscreen && !frame.Current.BoundingRectangle.IsEmpty)
+                        anchor = Pixels(frame.Current.BoundingRectangle);
                 }
+                if (!anchor.HasValue) anchor = overflow;
                 if (!anchor.HasValue) return null;
                 double scale = Math.Max(96, GetDpiForWindow(bar)) / 96d;
                 return TaskbarPlacement.LeftOfTray(rect.Value, info.Bounds.Value, anchor.Value,
@@ -89,6 +92,7 @@ namespace SleepTimer
             if (foreground == IntPtr.Zero || foreground == bar) return true;
             GetWindowThreadProcessId(foreground, out uint process);
             if (process == GetCurrentProcessId()) return true; // Our context menu may overlap the timer.
+            if (IsShellOverlay(process)) return true; // Start/Search use full-screen transparent host windows.
             var name = new StringBuilder(256);
             GetClassName(foreground, name, name.Capacity);
             if (name.ToString() == "Progman" || name.ToString() == "WorkerW") return true;
@@ -97,6 +101,27 @@ namespace SleepTimer
             if (DwmGetWindowAttribute(foreground, 9, out Rect front, Marshal.SizeOf(typeof(Rect))) != 0
                 && !GetWindowRect(foreground, out front)) return true;
             return !front.Value.Contains(target);
+        }
+
+        static bool IsShellOverlay(uint process)
+        {
+            if (process != lastForegroundProcess)
+            {
+                lastForegroundProcess = process; shellOverlay = false;
+                try
+                {
+                    using (var app = System.Diagnostics.Process.GetProcessById((int)process))
+                    {
+                        string name = app.ProcessName;
+                        shellOverlay = name == "StartMenuExperienceHost" || name == "SearchHost" || name == "SearchApp"
+                            || name == "SearchUI" || name == "ShellExperienceHost";
+                    }
+                }
+                catch (ArgumentException) { }
+                catch (InvalidOperationException) { }
+                catch (System.ComponentModel.Win32Exception) { }
+            }
+            return shellOverlay;
         }
 
         static Rectangle Pixels(System.Windows.Rect value) => Rectangle.FromLTRB((int)Math.Floor(value.Left),

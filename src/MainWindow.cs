@@ -608,11 +608,11 @@ namespace SleepTimer
             Settings.Set("taskbar_timer", enabled);
             if (!enabled) { taskbarTimer?.Dispose(); taskbarTimer = null; return; }
             if (taskbarTimer == null)
-                taskbarTimer = new TaskbarTimer(StartPause, () =>
+                taskbarTimer = new TaskbarTimer(StartPause, Cancel, () =>
                 {
                     Native.GetPhysicalCursorPos(out var point);
                     trayClick = new Point(point.X, point.Y); ShowTrayMenu();
-                });
+                }, face.Scroll);
             UpdateView();
         }
         void ApplyFontWeight(int weight, bool ui)
@@ -663,7 +663,9 @@ namespace SleepTimer
         void AddTime(int delta)
         {
             if (executing) return;
-            double current = countdown.State == TimerState.Idle ? clockMode ? clockMinute * 60 : countdown.Duration : countdown.Remaining;
+            double current = clockMode && countdown.TargetTime.HasValue
+                ? TimeZoneInfo.ConvertTime(countdown.TargetTime.Value, TimeZoneInfo.Local).TimeOfDay.TotalSeconds
+                : countdown.State == TimerState.Idle ? clockMode ? clockMinute * 60 : countdown.Duration : countdown.Remaining;
             double adjustment = hourStop.Adjust(current, delta, clock.Elapsed.TotalMilliseconds);
             if (adjustment == 0) return;
             if (countdown.State == TimerState.Idle)
@@ -675,7 +677,7 @@ namespace SleepTimer
                 }
                 else { countdown.SetDuration(countdown.Duration + (int)adjustment); durationDirty = true; wheelSave.Restart(); }
             }
-            else { countdown.Adjust(adjustment); if (countdown.Remaining > 60) warned = false; }
+            else { countdown.Adjust(adjustment); SyncClockTarget(); if (countdown.Remaining > 60) warned = false; }
             // Every wheel event updates the model immediately; paint only the latest target per frame.
             if (!wheelViewPending)
             {
@@ -694,10 +696,20 @@ namespace SleepTimer
                 case TimerState.Paused: countdown.Resume(); break;
                 default:
                     var now = DateTimeOffset.Now;
-                    double seconds = clockMode ? (TimeText.NextOccurrence(now, clockMinute, TimeZoneInfo.Local) - now).TotalSeconds : countdown.Duration;
-                    countdown.Start(seconds); warned = false; break;
+                    if (clockMode) countdown.StartAt(TimeText.NextOccurrence(now, clockMinute, TimeZoneInfo.Local), TimeZoneInfo.Local);
+                    else countdown.Start(countdown.Duration);
+                    warned = false; break;
             }
+            SyncClockTarget();
+            if (countdown.Remaining > 60) warned = false;
             ApplyAwake(); UpdateView();
+        }
+        void SyncClockTarget()
+        {
+            if (!clockMode || !countdown.TargetTime.HasValue) return;
+            var target = TimeZoneInfo.ConvertTime(countdown.TargetTime.Value, TimeZoneInfo.Local);
+            clockMinute = target.Hour * 60 + target.Minute;
+            clockField.Text = TimeText.HourMinute(clockMinute);
         }
         void Cancel()
         {
@@ -920,12 +932,15 @@ namespace SleepTimer
             }
             // Windows controls thumbnail width. Keep the header short enough to
             // show the full time; expose action and state in the shell tooltip.
-            string status = idle ? clockMode ? "Scheduled" : "Ready" : state == TimerState.Running ? "Running" : "Paused";
+            string status = idle ? "Ready" : state == TimerState.Running ? "Running" : "Paused";
             Title = IsVisible ? face.Time + " · " + status : face.Time;
             TaskbarItemInfo.Description = face.Time + " · " + action.Label + " · "
-                + (idle ? clockMode ? "Scheduled" : "Ready" : state == TimerState.Running ? "Running" : "Paused");
+                + status;
             face.Tone = TimerStatus.Tone(state, seconds); face.UpdatePosition(seconds, animate, state == TimerState.Running);
-            taskbarTimer?.Update(TimeText.Clock(seconds), action.Label, state, idle ? 1 : countdown.Fraction, face.Tone);
+            string miniTime = clockMode ? "At " + (countdown.TargetTime.HasValue
+                ? TimeZoneInfo.ConvertTime(countdown.TargetTime.Value, TimeZoneInfo.Local).ToString("HH:mm")
+                : TimeText.HourMinute(clockMinute)) : TimeText.Clock(seconds);
+            taskbarTimer?.Update(miniTime, action.Label, state, idle ? 1 : countdown.Fraction, face.Tone);
             // Tray IPC, menus and unrelated controls refresh on the regular status tick.
             if (dialOnly) return;
             picker.SetCurrent(action.Key); picker.IsEnabled = mode.IsEnabled = idle;
