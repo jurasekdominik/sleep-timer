@@ -473,8 +473,9 @@ namespace SleepTimer
             }
         }
 
-        [STAThread] static int Main()
+        [STAThread] static int Main(string[] args)
         {
+            if (args.Length == 2 && args[0] == "--native-owner-test") return NativeChecks.OwnerExitProbe(args[1], Pump);
             // Preserve the caller's settings. No expiry polling or power action runs in this suite.
             using (var key = Registry.CurrentUser.CreateSubKey(@"Software\SleepTimer"))
             {
@@ -511,6 +512,7 @@ namespace SleepTimer
                         CheckCountdownAnimation(Field<TimerFace>(window, "face"));
                         CheckIdleScheduling(window);
                         CheckTaskbarTimer(window);
+                        NativeChecks.Run(Pump);
                         var countdown = Field<Countdown>(window, "countdown");
                         var face = Field<TimerFace>(window, "face");
                         Call(window, "SetAction", "shutdown");

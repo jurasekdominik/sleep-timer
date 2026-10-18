@@ -35,6 +35,8 @@ jobs:
       - run: dotnet build SleepTimer.csproj -c Release --nologo -warnaserror
       - shell: pwsh
         run: ./scripts/check-windows.ps1
+        env:
+          SLEEP_TIMER_NATIVE_REQUIRED: '1'
       - name: Measure executable and verify standalone startup
         shell: pwsh
         run: |
