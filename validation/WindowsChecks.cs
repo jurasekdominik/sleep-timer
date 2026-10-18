@@ -483,6 +483,7 @@ namespace SleepTimer
                 {
                     Settings.Set("start_with_windows", false); Settings.Set("awake", false);
                     Settings.Set("taskbar_timer", false);
+                    Settings.Set("native_taskbar", false); // Existing checks exercise the compatibility renderer.
                     Settings.Set("clock_mode", false); Settings.Set("duration", 1800);
                     Settings.Set("circle_sweep_ms", 600); Settings.Set("counter_sweep_ms", 600);
                     Settings.Set("timer_font", "segoe"); Settings.Set("ui_font", "segoe");

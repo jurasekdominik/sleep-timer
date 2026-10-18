@@ -12,7 +12,7 @@ permissions:
 jobs:
   measure:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v5
         with:
@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
+      - shell: pwsh
+        run: ./scripts/build-native.ps1
       - shell: pwsh
         env:
           PERFORMANCE_BASELINE: ${{ inputs.baseline_ref || github.event.pull_request.base.sha }}

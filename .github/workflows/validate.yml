@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
+      - shell: pwsh
+        run: ./scripts/build-native.ps1
       - run: dotnet build SleepTimer.csproj -c Release --nologo -warnaserror
       - shell: pwsh
         run: ./scripts/check-windows.ps1

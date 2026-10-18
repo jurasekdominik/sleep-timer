@@ -1,0 +1,6 @@
+<Project>
+  <!-- Optional on SDK-only builds. Full Windows builds embed the native host in the portable exe. -->
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)native/bin/SleepTimer.Taskbar.exe')">
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)native/bin/SleepTimer.Taskbar.exe" LogicalName="SleepTimer.NativeTaskbar.exe" />
+  </ItemGroup>
+</Project>

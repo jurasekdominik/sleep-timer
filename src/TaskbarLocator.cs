@@ -100,8 +100,8 @@ namespace SleepTimer
             catch (System.ComponentModel.Win32Exception) { return null; }
         }
 
-        // No accessibility calls here: foreground and auto-hide changes must not wait for Explorer.
-        public static bool CanShow(Rectangle target)
+        // A native child inherits its parent's visibility and Z order, including Start/fullscreen.
+        public static bool CanEmbed(Rectangle target)
         {
             var bar = FindWindow("Shell_TrayWnd", null);
             if (bar == IntPtr.Zero || !IsWindowVisible(bar) || !GetWindowRect(bar, out var bounds)
@@ -109,6 +109,14 @@ namespace SleepTimer
             if (DwmGetWindowAttribute(bar, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return false;
             var info = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
             if (!GetMonitorInfo(MonitorFromWindow(bar, 2), ref info) || !info.Bounds.Value.Contains(target)) return false;
+            return true;
+        }
+
+        // No accessibility calls here: foreground and auto-hide changes must not wait for Explorer.
+        public static bool CanShow(Rectangle target)
+        {
+            if (!CanEmbed(target)) return false;
+            var bar = FindWindow("Shell_TrayWnd", null);
             var foreground = GetForegroundWindow();
             if (foreground == IntPtr.Zero || foreground == bar) return true;
             GetWindowThreadProcessId(foreground, out uint process);
