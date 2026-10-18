@@ -473,6 +473,35 @@ namespace SleepTimer
             }
         }
 
+        static void CheckShellUpdates(MainWindow window)
+        {
+            Console.WriteLine("CHECK: coalesced shell updates and final timer value");
+            var countdown = Field<Countdown>(window, "countdown");
+            var refresh = Field<DispatcherTimer>(window, "shellRefresh");
+            try
+            {
+                countdown.SetDuration(1800); Call(window, "UpdateView", false);
+                string before = window.Title;
+                for (int i = 0; i < 5; i++) Call(window, "AddTime", 60);
+                Call(window, "RenderWheelView", null, EventArgs.Empty);
+                Check(countdown.Duration == 2100 && window.Title == before && refresh.IsEnabled,
+                    "Wheel input must reach the model immediately while shell updates are coalesced");
+                PumpUntil(() => !refresh.IsEnabled, 500, "One-shot shell refresh did not stop");
+                Check(window.Title == "35:00 · Ready" && window.TaskbarItemInfo.Description.Contains("35:00"),
+                    "Shell refresh lost the last wheel edit");
+                Call(window, "AddTime", 60); Call(window, "RenderWheelView", null, EventArgs.Empty);
+                Call(window, "StartPause");
+                Check(!refresh.IsEnabled && window.Title.Contains("36:00") && window.Title.Contains("Running"),
+                    "Starting a timer must flush pending shell text immediately");
+                Call(window, "Cancel"); Pump(150);
+                Check(!refresh.IsEnabled && window.Title.Contains("Ready"), "A delayed shell update overwrote cancellation");
+            }
+            finally
+            {
+                Call(window, "Cancel"); countdown.SetDuration(1800); Call(window, "UpdateView", false);
+            }
+        }
+
         [STAThread] static int Main(string[] args)
         {
             if (args.Length == 3 && args[0] == "--native-owner-test")
@@ -512,6 +541,7 @@ namespace SleepTimer
                     {
                         CheckCountdownAnimation(Field<TimerFace>(window, "face"));
                         CheckIdleScheduling(window);
+                        CheckShellUpdates(window);
                         CheckTaskbarTimer(window);
                         NativeChecks.Run(Pump);
                         var countdown = Field<Countdown>(window, "countdown");

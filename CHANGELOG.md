@@ -1,5 +1,4 @@
-# Sleep Timer 1.2
+# Sleep Timer 1.3
 
-- Added a taskbar timer with click, scroll and double-click controls.
-- Fixed at-time pause/resume.
-- Reduced CPU use and fixed app crashes.
+- Moved the taskbar timer to a native Windows component.
+- Reduced redraws while adjusting the timer.

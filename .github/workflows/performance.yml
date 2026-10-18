@@ -12,7 +12,7 @@ permissions:
 jobs:
   measure:
     runs-on: windows-latest
-    timeout-minutes: 12
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v5
         with:

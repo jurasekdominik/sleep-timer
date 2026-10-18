@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 #include <d2d1.h>
 #include <dwrite.h>
 #include <wrl/client.h>
@@ -244,6 +245,7 @@ HWND parseHandle(const wchar_t* text) noexcept {
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+    if (FAILED(SetCurrentProcessExplicitAppUserModelID(L"JurasekDominik.SleepTimer"))) return 1;
     int count = 0;
     auto arguments = CommandLineToArgvW(GetCommandLineW(), &count);
     if (!arguments) return 2;
@@ -263,6 +265,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     if (!host.renderer.init()) { CloseHandle(alive); return 6; }
     WNDCLASSW type{};
     type.style = CS_DBLCLKS; type.lpfnWndProc = windowProcedure; type.hInstance = instance;
+    type.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(101));
     type.hCursor = LoadCursorW(nullptr, IDC_HAND); type.lpszClassName = windowClass;
     if (!RegisterClassW(&type)) { CloseHandle(alive); return 7; }
     auto window = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, windowClass, L"Sleep Timer",

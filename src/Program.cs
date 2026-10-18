@@ -7,8 +7,8 @@ using System.Windows;
 [assembly: AssemblyProduct("Sleep Timer")]
 [assembly: AssemblyDescription("Sleep Timer - WPF edition")]
 [assembly: AssemblyCopyright("Dominik Jurásek")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
 namespace SleepTimer
 {
@@ -19,6 +19,7 @@ namespace SleepTimer
         [STAThread] static void Main(string[] args)
         {
             try { Native.SetDllDirectory(""); } catch { }
+            Native.SetCurrentProcessExplicitAppUserModelID("JurasekDominik.SleepTimer");
             if (!SingleInstance.Claim()) return;
             var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
             app.DispatcherUnhandledException += (s, e) => CrashLog.Write(e.Exception);

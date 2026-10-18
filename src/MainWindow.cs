@@ -26,6 +26,7 @@ namespace SleepTimer
         readonly Forms.NotifyIcon tray = new Forms.NotifyIcon();
         readonly DispatcherTimer ticker = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(100) };
         readonly DispatcherTimer durationSave = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        readonly DispatcherTimer shellRefresh = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(100) };
         DispatcherTimer aborted;
         readonly TimerFace face = new TimerFace();
         readonly Canvas main = new Canvas(), settings = new Canvas();
@@ -151,6 +152,7 @@ namespace SleepTimer
             tray.BalloonTipClicked += (s, e) => Dispatcher.BeginInvoke((Action)ShowWindow);
             ticker.Tick += (s, e) => Tick();
             durationSave.Tick += (s, e) => SaveDuration();
+            shellRefresh.Tick += (s, e) => { shellRefresh.Stop(); RefreshShell(); };
             SourceInitialized += (s, e) =>
             {
                 source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
@@ -280,7 +282,7 @@ namespace SleepTimer
             SwitchRow(general, "Start with Windows", "Opens in the tray when you sign in", startupSwitch, 0);
             SwitchRow(general, "Force close apps", "Skips “save changes?” prompts (/f)", forceSwitch, 60);
             taskbarRenderer.Style = (Style)FindResource("TextButton");
-            taskbarRenderer.Content = Settings.Get("native_taskbar", true) ? "Native (preview) ▾" : "Compatible (WPF) ▾";
+            taskbarRenderer.Content = Settings.Get("native_taskbar", true) ? "Native ▾" : "Compatible (WPF) ▾";
             taskbarRenderer.ToolTip = "Choose taskbar rendering. Native attaches to the taskbar; WPF provides a compatibility fallback.";
             taskbarRenderer.Click += (s, e) =>
             {
@@ -288,7 +290,7 @@ namespace SleepTimer
                 bool selected = Settings.Get("native_taskbar", true);
                 rendererMenu.Show(new[] {
                     new MenuRow { Text = taskbarTimer == null ? "Rendering" : "Rendering: " + taskbarTimer.RendererDescription, Header = true },
-                    new MenuRow { Text = "Native (preview)", Selected = selected, Click = () => SetTaskbarRenderer(true) },
+                    new MenuRow { Text = "Native", Selected = selected, Click = () => SetTaskbarRenderer(true) },
                     new MenuRow { Text = "Compatible (WPF)", Selected = !selected, Click = () => SetTaskbarRenderer(false) }
                 }, taskbarRenderer);
             };
@@ -644,7 +646,7 @@ namespace SleepTimer
         void SetTaskbarRenderer(bool native)
         {
             Settings.Set("native_taskbar", native);
-            taskbarRenderer.Content = native ? "Native (preview) ▾" : "Compatible (WPF) ▾";
+            taskbarRenderer.Content = native ? "Native ▾" : "Compatible (WPF) ▾";
             taskbarTimer?.Dispose(); taskbarTimer = null;
             if (taskbarSwitch.IsChecked == true) SetTaskbarTimer(true);
         }
@@ -986,19 +988,14 @@ namespace SleepTimer
                 face.Title = state == TimerState.Running ? action.RunTitle : "PAUSED"; face.Time = TimeText.Clock(seconds);
                 face.Sub = state == TimerState.Running ? action.At + " " + DateTimeOffset.Now.AddSeconds(seconds).ToLocalTime().ToString("HH:mm") : "Resume to continue";
             }
-            // Windows controls thumbnail width. Keep the header short enough to
-            // show the full time; expose action and state in the shell tooltip.
-            string status = idle ? "Ready" : state == TimerState.Running ? "Running" : "Paused";
-            Title = IsVisible ? face.Time + " · " + status : face.Time;
-            TaskbarItemInfo.Description = face.Time + " · " + action.Label + " · "
-                + status;
             face.Tone = TimerStatus.Tone(state, seconds); face.UpdatePosition(seconds, animate, state == TimerState.Running);
-            string miniTime = clockMode ? "At " + (countdown.TargetTime.HasValue
-                ? TimeZoneInfo.ConvertTime(countdown.TargetTime.Value, TimeZoneInfo.Local).ToString("HH:mm")
-                : TimeText.HourMinute(clockMinute)) : TimeText.Clock(seconds);
-            taskbarTimer?.Update(miniTime, action.Label, state, idle ? 1 : countdown.Fraction, face.Tone);
-            // Tray IPC, menus and unrelated controls refresh on the regular status tick.
-            if (dialOnly) return;
+            // Keep dial easing at display speed; shell text and cross-process drawing need at most 10 Hz.
+            if (dialOnly)
+            {
+                if (!shellRefresh.IsEnabled) shellRefresh.Start();
+                return;
+            }
+            shellRefresh.Stop(); RefreshShell();
             picker.SetCurrent(action.Key); picker.IsEnabled = mode.IsEnabled = idle;
             forceSwitch.IsEnabled = action.Key != "sleep";
             string awake = awakeMinutes < 0 ? "on" : awakeMinutes > 0 ? TimeText.Clock(awakeEnd - clock.Elapsed.TotalSeconds) : null;
@@ -1014,6 +1011,25 @@ namespace SleepTimer
             if (awake != null) tip += "\nKeep awake: " + awake;
             tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
             UpdateIcon(idle ? 1 : countdown.Fraction, state, face.Tone);
+        }
+
+        void RefreshShell()
+        {
+            if (disposed || executing) return;
+            var state = countdown.State;
+            bool idle = state == TimerState.Idle;
+            double seconds = idle ? countdown.Duration : countdown.Remaining;
+            string time = idle && clockMode ? TimeText.HourMinute(clockMinute) : TimeText.Clock(seconds);
+            string status = idle ? "Ready" : state == TimerState.Running ? "Running" : "Paused";
+            // Windows controls thumbnail width. Keep the title short and put details in its tooltip.
+            string title = IsVisible ? time + " · " + status : time;
+            if (Title != title) Title = title;
+            string description = time + " · " + action.Label + " · " + status;
+            if (TaskbarItemInfo.Description != description) TaskbarItemInfo.Description = description;
+            string miniTime = clockMode ? "At " + (countdown.TargetTime.HasValue
+                ? TimeZoneInfo.ConvertTime(countdown.TargetTime.Value, TimeZoneInfo.Local).ToString("HH:mm")
+                : TimeText.HourMinute(clockMinute)) : time;
+            taskbarTimer?.Update(miniTime, action.Label, state, idle ? 1 : countdown.Fraction, TimerStatus.Tone(state, seconds));
         }
 
         void UpdateIcon(double fraction, TimerState state, TimerTone tone)
@@ -1133,7 +1149,7 @@ namespace SleepTimer
         {
             if (disposed) return;
             SaveDuration(); disposed = true;
-            ticker.Stop(); durationSave.Stop(); aborted?.Stop();
+            ticker.Stop(); durationSave.Stop(); shellRefresh.Stop(); aborted?.Stop();
             CompositionTarget.Rendering -= RenderWheelView; wheelViewPending = false;
             UnregisterShortcuts();
             source?.RemoveHook(WindowMessage);

@@ -53,7 +53,7 @@ namespace SleepTimer
             return child != IntPtr.Zero && IsWindowVisible(child);
         }
 
-        static async Task Measure(MainWindow window, string name, int seconds, bool baseline, string output)
+        static async Task Measure(MainWindow window, string name, int seconds, bool baseline, string output, bool adjusting = false)
         {
             await Task.Delay(5000); // Allow JIT, layout, placement and shell providers to settle.
             using (var process = Process.GetCurrentProcess())
@@ -67,9 +67,13 @@ namespace SleepTimer
                 var working = new List<long>(); var memory = new List<long>(); var managed = new List<long>();
                 var helperWorking = new List<long>();
                 var elapsed = Stopwatch.StartNew();
-                for (int i = 0; i < seconds; i++)
+                int inputs = 0;
+                for (int i = 0; i < seconds * (adjusting ? 20 : 1); i++)
                 {
-                    await Task.Delay(1000);
+                    await Task.Delay(adjusting ? 50 : 1000);
+                    // Sustained 20 wheel edits/second through the app's real coalescing and animation path.
+                    if (adjusting) { Call(window, "AddTime", (i / 10 % 2 == 0 ? 1 : -1) * 60); inputs++; }
+                    if (adjusting && i % 20 != 19) continue;
                     foreach (var item in sampled) item.Refresh();
                     working.Add(sampled.Sum(item => item.WorkingSet64)); memory.Add(sampled.Sum(item => item.PrivateMemorySize64));
                     managed.Add(GC.GetTotalMemory(false)); helperWorking.Add(helper?.WorkingSet64 ?? 0);
@@ -83,12 +87,12 @@ namespace SleepTimer
                     MiB(memory.Min()).ToString("F2", CultureInfo.InvariantCulture), MiB(memory.Max()).ToString("F2", CultureInfo.InvariantCulture),
                     MiB(managed.Min()).ToString("F2", CultureInfo.InvariantCulture), MiB(managed.Max()).ToString("F2", CultureInfo.InvariantCulture),
                     gdi, sampled.Sum(item => GetGuiResources(item.Handle, 0)), handles, sampled.Sum(item => item.HandleCount), WidgetVisible(window), placementMode,
-                    Renderer(window), helperCore.ToString("F3", CultureInfo.InvariantCulture), MiB(helperWorking.Max()).ToString("F2", CultureInfo.InvariantCulture));
+                    Renderer(window), helperCore.ToString("F3", CultureInfo.InvariantCulture), MiB(helperWorking.Max()).ToString("F2", CultureInfo.InvariantCulture), inputs);
                 File.AppendAllText(output, row + Environment.NewLine);
                 Console.WriteLine("PERF " + row);
                 if (nativeRequested && name.Contains("widget") && (helper == null || Renderer(window) != "Native" || !WidgetVisible(window)))
                     throw new Exception("Native benchmark lost the visible native component");
-                if (!baseline && name.Contains("idle") && core > 2)
+                if (!baseline && !adjusting && name.Contains("idle") && core > 2)
                     throw new Exception("Unexpected idle CPU: " + core.ToString("F2") + "% of one core");
             }
         }
@@ -171,10 +175,25 @@ namespace SleepTimer
             }
         }
 
-        static async Task Run(MainWindow window, bool baseline, string output)
+        static async Task Adjustments(MainWindow window, bool baseline, string output)
         {
-            File.WriteAllText(output, "phase,seconds,cpu_one_core_percent,cpu_machine_percent,working_min_mib,working_max_mib,private_min_mib,private_max_mib,managed_min_mib,managed_max_mib,gdi_before,gdi_after,handles_before,handles_after,widget_visible,placement_mode,renderer,helper_cpu_one_core_percent,helper_working_max_mib\n");
+            Call(window, "Cancel");
+            Field<Countdown>(window, "countdown").SetDuration(5400);
+            Call(window, "UpdateView", false);
+            await Measure(window, "adjusting_idle_window_widget", 20, baseline, output, true);
+            Call(window, "StartPause");
+            await Measure(window, "adjusting_running_window_widget", 20, baseline, output, true);
+        }
+
+        static async Task Run(MainWindow window, bool baseline, bool adjustmentsOnly, string output)
+        {
+            File.WriteAllText(output, "phase,seconds,cpu_one_core_percent,cpu_machine_percent,working_min_mib,working_max_mib,private_min_mib,private_max_mib,managed_min_mib,managed_max_mib,gdi_before,gdi_after,handles_before,handles_after,widget_visible,placement_mode,renderer,helper_cpu_one_core_percent,helper_working_max_mib,adjustments\n");
             Console.WriteLine("PERF environment: " + Environment.OSVersion + "; CLR " + Environment.Version + "; logical processors " + Environment.ProcessorCount);
+            if (adjustmentsOnly)
+            {
+                await EnableWidget(window); window.ShowWindow();
+                await Adjustments(window, baseline, output); return;
+            }
             await Measure(window, "idle_tray", 30, baseline, output);
             bool supportsWidget = window.GetType().GetMethod("SetTaskbarTimer", Fields) != null;
             if (supportsWidget)
@@ -186,6 +205,7 @@ namespace SleepTimer
             await Measure(window, supportsWidget ? "running_tray_widget" : "running_tray", 45, baseline, output);
             window.ShowWindow();
             await Measure(window, supportsWidget ? "running_window_widget" : "running_window", 30, baseline, output);
+            if (supportsWidget) await Adjustments(window, baseline, output);
             if (!baseline && supportsWidget) await CheckCycles(window, Path.ChangeExtension(output, ".cycles.txt"));
         }
 
@@ -210,7 +230,7 @@ namespace SleepTimer
                     int result = 0;
                     app.Dispatcher.BeginInvoke((Action)(async () =>
                     {
-                        try { await Run(window, baseline, output); }
+                        try { await Run(window, baseline, args.Contains("--adjustments-only"), output); }
                         catch (Exception error) { Console.WriteLine("::error::" + error); result = 1; }
                         finally
                         {

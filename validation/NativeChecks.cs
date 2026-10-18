@@ -58,11 +58,15 @@ namespace SleepTimer
         internal static void Run(Action<int> pump)
         {
             Check(Marshal.SizeOf(typeof(NativeTaskbarHost.View)) == 312, "Managed/native packet layout mismatch");
-            if (NativeTaskbarHost.ExecutablePath() == null)
+            string executable = NativeTaskbarHost.ExecutablePath();
+            if (executable == null)
             {
                 Check(Environment.GetEnvironmentVariable("SLEEP_TIMER_NATIVE_REQUIRED") != "1", "Required native component was not embedded");
                 Console.WriteLine("SKIP: native host absent in SDK-only build"); return;
             }
+            var version = FileVersionInfo.GetVersionInfo(executable);
+            Check(version.ProductName == "Sleep Timer" && version.FileDescription == "Sleep Timer - taskbar timer"
+                && version.FileVersion == typeof(Program).Assembly.GetName().Version.ToString(), "Native app branding/version differs from the main app");
             Console.WriteLine("CHECK: native child rendering, input and fallback");
             var parent = Parent(); Check(parent != IntPtr.Zero, "Native taskbar stand-in could not be created");
             int toggled = 0, cancelled = 0, opened = 0, menus = 0, wheel = 0;
