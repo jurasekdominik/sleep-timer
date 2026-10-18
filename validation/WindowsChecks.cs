@@ -20,6 +20,16 @@ namespace SleepTimer
     static class WindowsChecks
     {
         [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out WindowRect rectangle);
+        [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
+        [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+        static bool IsAbove(IntPtr upper, IntPtr lower)
+        {
+            int remaining = 256;
+            for (var at = GetWindow(lower, 3); at != IntPtr.Zero && remaining-- > 0; at = GetWindow(at, 3))
+                if (at == upper) return true;
+            return false;
+        }
         [StructLayout(LayoutKind.Sequential)] struct WindowRect { public int Left, Top, Right, Bottom; }
         static WindowRect PopupBounds(PopupMenu menu)
         {
@@ -192,6 +202,23 @@ namespace SleepTimer
                 window.Hide(); Pump(50); Check(mini.IsVisible, "Mini timer disappeared with the main window");
                 window.Show();
                 var button = Field<Border>(mini, "button");
+                Check(((SolidColorBrush)button.Background).Color.A == 0 && ((SolidColorBrush)mini.Background).Color.A == 0,
+                    "Mini timer still paints an opaque background");
+                using (var cover = new TaskbarTimer(() => { }, () => { }, (width, height) => target))
+                {
+                    cover.Update("Cover", "Taskbar stand-in", TimerState.Idle, 1, TimerTone.Idle);
+                    Pump(700);
+                    var miniHandle = new WindowInteropHelper(mini).Handle;
+                    var coverHandle = new WindowInteropHelper(cover).Handle;
+                    SetWindowPos(coverHandle, (IntPtr)(-1), 0, 0, 0, 0, 0x0213);
+                    Check(IsAbove(coverHandle, miniHandle), "Could not simulate the taskbar rising above the timer");
+                    var foreground = GetForegroundWindow();
+                    Call(mini, "KeepAbove", coverHandle);
+                    Check(IsAbove(miniHandle, coverHandle), "Mini timer did not restore its order above the taskbar");
+                    Check(GetForegroundWindow() == foreground, "Restoring mini timer order stole keyboard focus");
+                    GetWindowRect(miniHandle, out var raised);
+                    Check(raised.Left == target.Left && raised.Top == target.Top, "Restoring order moved the mini timer");
+                }
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
                     { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
@@ -204,6 +231,7 @@ namespace SleepTimer
                 Check(!mini.IsVisible, "Mini timer must hide when taskbar placement is unavailable");
                 mini.Dispose();
                 Check(!Field<DispatcherTimer>(mini, "placement").IsEnabled, "Mini timer polling survives disposal");
+                Check(Field<IntPtr>(mini, "foregroundHook") == IntPtr.Zero, "Mini timer foreground hook survives disposal");
             }
             Call(window, "SetTaskbarTimer", true);
             Check(Settings.Get("taskbar_timer", false) && Field<TaskbarTimer>(window, "taskbarTimer") != null,
