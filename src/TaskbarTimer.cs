@@ -21,6 +21,7 @@ namespace SleepTimer
             TextAlignment = TextAlignment.Right, TextTrimming = TextTrimming.CharacterEllipsis };
         readonly MiniRing ring = new MiniRing { Width = 28, Height = 28, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         readonly DispatcherTimer placement = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+        readonly DispatcherTimer leftClick = new DispatcherTimer(DispatcherPriority.Input);
         readonly Func<int, int, PixelRectangle?> locate;
         readonly Func<PixelRectangle, bool> canShow;
         readonly Stopwatch probeAge = new Stopwatch();
@@ -29,12 +30,18 @@ namespace SleepTimer
         HwndSource source;
         readonly WinEventProc foregroundChanged;
         IntPtr foregroundHook;
+        IntPtr taskbarHook;
+        uint explorerProcess;
+        string layoutStamp;
+        bool layoutDirty = true;
         bool disposed;
         bool foregroundRefreshQueued;
+        bool suppressLeftRelease;
         string viewKey;
         PixelRectangle? previous;
         PixelRectangle? pending;
         bool waitingForLayout = true;
+        static readonly int TaskbarCreated = RegisterWindowMessage("TaskbarCreated");
         [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr window, int index);
         [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr window, int index, int value);
         [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
@@ -44,10 +51,11 @@ namespace SleepTimer
         [DllImport("user32.dll")] static extern IntPtr SetWinEventHook(uint first, uint last, IntPtr module,
             WinEventProc callback, uint process, uint thread, uint flags);
         [DllImport("user32.dll")] static extern bool UnhookWinEvent(IntPtr hook);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int RegisterWindowMessage(string name);
 
         public TaskbarTimer(Action toggle, Action cancel, Action menu, Action<int, ModifierKeys> scroll,
             Func<int, int, PixelRectangle?> locate = null,
-            Func<PixelRectangle, bool> canShow = null)
+            Func<PixelRectangle, bool> canShow = null, Action open = null)
         {
             this.locate = locate ?? TaskbarLocator.Locate;
             this.canShow = canShow ?? TaskbarLocator.CanShow;
@@ -69,15 +77,32 @@ namespace SleepTimer
             time.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
             action.SetResourceReference(TextBlock.ForegroundProperty, "SecondBrush");
             Content = button;
-            button.MouseLeftButtonUp += (s, e) => { toggle(); e.Handled = true; };
-            button.MouseRightButtonUp += (s, e) => { cancel(); e.Handled = true; };
+            leftClick.Tick += (s, e) => { leftClick.Stop(); if (!disposed) toggle(); };
+            button.MouseLeftButtonDown += (s, e) =>
+            {
+                suppressLeftRelease = e.ClickCount > 1;
+                if (suppressLeftRelease) { leftClick.Stop(); open?.Invoke(); }
+                e.Handled = true;
+            };
+            button.MouseLeftButtonUp += (s, e) =>
+            {
+                if (!suppressLeftRelease)
+                {
+                    leftClick.Stop();
+                    leftClick.Interval = TimeSpan.FromMilliseconds(System.Windows.Forms.SystemInformation.DoubleClickTime);
+                    leftClick.Start();
+                }
+                suppressLeftRelease = false; e.Handled = true;
+            };
+            button.MouseRightButtonUp += (s, e) => { leftClick.Stop(); cancel(); e.Handled = true; };
             button.MouseUp += (s, e) =>
             {
                 if (e.ChangedButton != MouseButton.Middle) return;
+                leftClick.Stop();
                 Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() => { if (!disposed) menu(); }));
                 e.Handled = true;
             };
-            button.MouseWheel += (s, e) => { scroll(e.Delta, Keyboard.Modifiers); e.Handled = true; };
+            button.MouseWheel += (s, e) => { leftClick.Stop(); scroll(e.Delta, Keyboard.Modifiers); e.Handled = true; };
             SourceInitialized += (s, e) =>
             {
                 source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
@@ -90,31 +115,53 @@ namespace SleepTimer
             };
             foregroundChanged = (hook, message, window, objectId, childId, thread, stamp) =>
             {
-                if (disposed || Dispatcher.HasShutdownStarted || foregroundRefreshQueued) return;
-                foregroundRefreshQueued = true;
-                try { Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() =>
-                {
-                    foregroundRefreshQueued = false;
-                    if (disposed) return;
-                    RefreshTaskbarLayer();
-                    var at = pending ?? previous;
-                    if (waitingForLayout && probe == null && at.HasValue && this.canShow(at.Value)) probeAge.Reset();
-                    RefreshPlacement();
-                })); }
-                catch (InvalidOperationException) { foregroundRefreshQueued = false; } // Dispatcher stopped during the native callback.
+                if (message == 3 || TaskbarLocator.IsTaskbarWindow(window)) QueueForegroundRefresh();
             };
             // Follow both taskbar activation and games becoming foreground, without taking focus.
             foregroundHook = SetWinEventHook(3, 3, IntPtr.Zero, foregroundChanged, 0, 0, 2);
             Closing += (s, e) => Stop();
             Closed += (s, e) => Stop();
-            placement.Tick += (s, e) => RefreshPlacement();
+            placement.Tick += (s, e) =>
+            {
+                WatchTaskbar();
+                string stamp = TaskbarLocator.LayoutStamp();
+                if (layoutStamp != stamp) { layoutStamp = stamp; layoutDirty = true; probeAge.Reset(); }
+                RefreshPlacement();
+            };
             new WindowInteropHelper(this).EnsureHandle();
-            RefreshPlacement(); placement.Start();
+            WatchTaskbar(); RefreshPlacement();
+        }
+
+        void WatchTaskbar()
+        {
+            uint process = TaskbarLocator.ExplorerProcess();
+            if (process == explorerProcess && (process == 0 || taskbarHook != IntPtr.Zero)) return;
+            if (taskbarHook != IntPtr.Zero) UnhookWinEvent(taskbarHook);
+            explorerProcess = process;
+            // Filter in Windows so activity in other applications does not wake this widget.
+            taskbarHook = process == 0 ? IntPtr.Zero : SetWinEventHook(0x8000, 0x800B, IntPtr.Zero, foregroundChanged, process, 0, 2);
+        }
+
+        void QueueForegroundRefresh()
+        {
+            if (disposed || Dispatcher.HasShutdownStarted || foregroundRefreshQueued) return;
+            foregroundRefreshQueued = true;
+            try { Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)RefreshAfterForegroundChange); }
+            catch (InvalidOperationException) { foregroundRefreshQueued = false; } // Dispatcher stopped during the native callback.
+        }
+
+        void RefreshAfterForegroundChange()
+        {
+            foregroundRefreshQueued = false;
+            if (disposed) return;
+            WatchTaskbar(); layoutDirty = true; probeAge.Reset();
+            RefreshPlacement();
         }
 
         IntPtr WindowMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (message == 0x0021) { handled = true; return (IntPtr)3; } // MA_NOACTIVATE
+            if (message == TaskbarCreated || message == 0x007E || message == 0x031E) QueueForegroundRefresh();
             return IntPtr.Zero;
         }
 
@@ -127,12 +174,14 @@ namespace SleepTimer
                 if (!probe.IsCompleted)
                 {
                     // Never accumulate stuck accessibility calls, or keep stale coordinates visible.
-                    if (probeAge.ElapsedMilliseconds > 1500) { Hide(); previous = pending = null; waitingForLayout = true; }
+                    if (probeAge.ElapsedMilliseconds > 1500)
+                    { Hide(); previous = pending = null; waitingForLayout = true; placement.Interval = TimeSpan.FromSeconds(30); }
                     return;
                 }
                 var bounds = probe.Status == TaskStatus.RanToCompletion ? probe.Result : null;
                 if (probe.IsFaulted) { var ignored = probe.Exception; }
                 probe = null;
+                layoutDirty = false;
                 if (!bounds.HasValue) { Hide(); previous = pending = null; waitingForLayout = true; }
                 else if (!canShow(bounds.Value))
                 {
@@ -153,7 +202,10 @@ namespace SleepTimer
                 }
                 RefreshTaskbarLayer();
             }
-            if (probeAge.IsRunning && probeAge.ElapsedMilliseconds < (pending.HasValue ? 200 : 1000)) return;
+            bool refresh = layoutDirty || pending.HasValue;
+            placement.Interval = refresh ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromSeconds(30);
+            placement.Start();
+            if (!refresh || (probeAge.IsRunning && probeAge.ElapsedMilliseconds < 200)) return;
             int width = (int)Width, height = (int)Height;
             probeAge.Restart(); probe = Task.Run(() => locate(width, height));
         }
@@ -190,15 +242,16 @@ namespace SleepTimer
             time.SetResourceReference(TextBlock.ForegroundProperty, state == TimerState.Idle ? "SecondBrush" : "TextBrush");
             action.Text = actionLabel + (state == TimerState.Idle ? " · Ready" : state == TimerState.Paused ? " · Paused" : "");
             button.ToolTip = value + " · " + actionLabel + " · " + (state == TimerState.Idle ? "Ready" : state.ToString())
-                + "\nClick to start or pause · Right-click to cancel · Scroll to adjust · Middle-click for menu";
+                + "\nClick to start or pause · Double-click to open · Right-click to cancel · Scroll to adjust · Middle-click for menu";
             ring.Fraction = fraction; ring.State = state; ring.Tone = tone; ring.InvalidateVisual();
         }
 
         void Stop()
         {
             if (disposed) return;
-            disposed = true; placement.Stop(); source?.RemoveHook(WindowMessage);
+            disposed = true; leftClick.Stop(); placement.Stop(); source?.RemoveHook(WindowMessage);
             if (foregroundHook != IntPtr.Zero) { UnhookWinEvent(foregroundHook); foregroundHook = IntPtr.Zero; }
+            if (taskbarHook != IntPtr.Zero) { UnhookWinEvent(taskbarHook); taskbarHook = IntPtr.Zero; }
         }
 
         public void Dispose()

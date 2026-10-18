@@ -19,12 +19,13 @@ namespace SleepTimer
 {
     sealed class MainWindow : Window, IDisposable
     {
-        readonly Stopwatch clock = Stopwatch.StartNew(), wheelSave = Stopwatch.StartNew();
+        readonly Stopwatch clock = Stopwatch.StartNew();
         readonly Countdown countdown;
         readonly HourStop hourStop = new HourStop();
         readonly QuickTimers quickTimers = new QuickTimers(Settings.Get("quick_timers", ""));
         readonly Forms.NotifyIcon tray = new Forms.NotifyIcon();
         readonly DispatcherTimer ticker = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(100) };
+        readonly DispatcherTimer durationSave = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         DispatcherTimer aborted;
         readonly TimerFace face = new TimerFace();
         readonly Canvas main = new Canvas(), settings = new Canvas();
@@ -147,6 +148,7 @@ namespace SleepTimer
             tray.MouseDoubleClick += (s, e) => { if (e.Button == Forms.MouseButtons.Left) Dispatcher.BeginInvoke((Action)ShowWindow); };
             tray.BalloonTipClicked += (s, e) => Dispatcher.BeginInvoke((Action)ShowWindow);
             ticker.Tick += (s, e) => Tick();
+            durationSave.Tick += (s, e) => SaveDuration();
             SourceInitialized += (s, e) =>
             {
                 source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
@@ -181,7 +183,7 @@ namespace SleepTimer
             new WindowInteropHelper(this).EnsureHandle();
             SyncMode(false); ApplyAwake(); UpdateView();
             if (taskbarSwitch.IsChecked == true) SetTaskbarTimer(true);
-            ticker.Start();
+            SyncTicker();
         }
 
         static bool IsDescendant(DependencyObject parent, DependencyObject child)
@@ -616,7 +618,7 @@ namespace SleepTimer
                 {
                     Native.GetPhysicalCursorPos(out var point);
                     trayClick = new Point(point.X, point.Y); ShowTrayMenu();
-                }, face.Scroll);
+                }, face.Scroll, open: ShowWindow);
             UpdateView();
         }
         void ApplyFontWeight(int weight, bool ui)
@@ -679,7 +681,11 @@ namespace SleepTimer
                     clockMinute = ((clockMinute + (int)(adjustment / 60)) % 1440 + 1440) % 1440; clockTouched = true;
                     clockField.Text = TimeText.HourMinute(clockMinute);
                 }
-                else { countdown.SetDuration(countdown.Duration + (int)adjustment); durationDirty = true; wheelSave.Restart(); }
+                else
+                {
+                    countdown.SetDuration(countdown.Duration + (int)adjustment); durationDirty = true;
+                    durationSave.Stop(); durationSave.Start();
+                }
             }
             else { countdown.Adjust(adjustment); SyncClockTarget(); if (countdown.Remaining > 60) warned = false; }
             // Every wheel event updates the model immediately; paint only the latest target per frame.
@@ -886,12 +892,30 @@ namespace SleepTimer
         void ApplyAwake() => Native.KeepAwake(awakeMinutes != 0 || countdown.State == TimerState.Running, awakeMinutes != 0 && screenOn);
         void SaveDuration()
         {
+            durationSave.Stop();
             if (!durationDirty) return; Settings.Set("duration", countdown.Duration); durationDirty = false;
+        }
+        void SyncTicker()
+        {
+            if (disposed || executing || TestMode) { ticker.Stop(); return; }
+            double milliseconds;
+            if (countdown.State == TimerState.Running)
+                milliseconds = Math.Min(IsVisible ? 100 : 1000, Math.Max(16, countdown.Remaining * 1000));
+            else if (awakeMinutes > 0) milliseconds = 1000;
+            else if (IsVisible && countdown.State == TimerState.Idle)
+            {
+                var now = DateTime.Now;
+                milliseconds = 60000 - now.Second * 1000 - now.Millisecond;
+            }
+            else { ticker.Stop(); return; }
+            if (awakeMinutes > 0) milliseconds = Math.Min(milliseconds, Math.Max(16, (awakeEnd - clock.Elapsed.TotalSeconds) * 1000));
+            var interval = TimeSpan.FromMilliseconds(milliseconds);
+            if (ticker.Interval != interval) ticker.Interval = interval;
+            ticker.Start();
         }
         void Tick()
         {
             if (disposed) return;
-            if (durationDirty && wheelSave.ElapsedMilliseconds >= 250) SaveDuration();
             if (awakeMinutes > 0 && clock.Elapsed.TotalSeconds >= awakeEnd) SetAwake(0);
             if (countdown.Expired) { Fire(); return; }
             if (countdown.State == TimerState.Running && countdown.Remaining <= 60 && !warned)
@@ -911,6 +935,7 @@ namespace SleepTimer
                 animate = true;
             }
             if (disposed || executing) return;
+            SyncTicker();
             var state = countdown.State; bool idle = state == TimerState.Idle;
             double seconds = idle ? countdown.Duration : countdown.Remaining;
             string idleLabel = "";
@@ -1026,7 +1051,7 @@ namespace SleepTimer
         }
         void OnResumed()
         {
-            if (disposed) return; executing = false; face.Interactive = true; ticker.Start(); UpdateView(true);
+            if (disposed) return; executing = false; face.Interactive = true; UpdateView(true);
         }
         public void ShowWindow()
         {
@@ -1081,7 +1106,7 @@ namespace SleepTimer
         {
             if (disposed) return;
             SaveDuration(); disposed = true;
-            ticker.Stop(); aborted?.Stop();
+            ticker.Stop(); durationSave.Stop(); aborted?.Stop();
             CompositionTarget.Rendering -= RenderWheelView; wheelViewPending = false;
             UnregisterShortcuts();
             source?.RemoveHook(WindowMessage);

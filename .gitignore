@@ -1,5 +1,6 @@
 bin/
 obj/
+validation-output/
 *.user
 .vs/
 SleepTimer.exe

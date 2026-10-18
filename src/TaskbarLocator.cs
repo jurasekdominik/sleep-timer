@@ -21,10 +21,33 @@ namespace SleepTimer
         [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+        [DllImport("user32.dll")] static extern bool IsChild(IntPtr parent, IntPtr child);
         [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
         [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out Rect value, int size);
         [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int count);
+
+        public static uint ExplorerProcess()
+        {
+            GetWindowThreadProcessId(FindWindow("Shell_TrayWnd", null), out uint process);
+            return process;
+        }
+
+        public static bool IsTaskbarWindow(IntPtr window)
+        {
+            var bar = FindWindow("Shell_TrayWnd", null);
+            return bar != IntPtr.Zero && (window == bar || IsChild(bar, window));
+        }
+
+        // Cheap recovery check for missed shell events; no accessibility traversal.
+        public static string LayoutStamp()
+        {
+            var bar = FindWindow("Shell_TrayWnd", null);
+            if (bar == IntPtr.Zero || !GetWindowRect(bar, out var bounds)) return "";
+            var tray = FindWindowEx(bar, IntPtr.Zero, "TrayNotifyWnd", null);
+            GetWindowRect(tray, out var notification);
+            return bar + ":" + bounds.Value + ":" + notification.Value + ":" + GetDpiForWindow(bar);
+        }
 
         // Called on a worker thread: Explorer's accessibility provider can be slow or unavailable.
         public static Rectangle? Locate(int logicalWidth, int logicalHeight)

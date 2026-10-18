@@ -1,0 +1,31 @@
+name: Performance
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Optional earlier commit to compare
+        type: string
+        required: false
+permissions:
+  contents: read
+jobs:
+  measure:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+      - shell: pwsh
+        env:
+          PERFORMANCE_BASELINE: ${{ inputs.baseline_ref || github.event.pull_request.base.sha }}
+        run: ./scripts/check-performance.ps1 -BaselineRef $env:PERFORMANCE_BASELINE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Performance
+          path: validation-output/performance*

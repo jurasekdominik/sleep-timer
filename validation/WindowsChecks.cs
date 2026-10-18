@@ -59,6 +59,15 @@ namespace SleepTimer
             return method.Invoke(owner, args);
         }
         static void Check(bool okay, string text) { if (!okay) throw new Exception(text); }
+        static void LeftClick(UIElement target, int count = 1)
+        {
+            foreach (var routed in new[] { UIElement.MouseLeftButtonDownEvent, UIElement.MouseLeftButtonUpEvent })
+            {
+                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = routed };
+                typeof(MouseButtonEventArgs).GetProperty("ClickCount").GetSetMethod(true).Invoke(args, new object[] { count });
+                target.RaiseEvent(args);
+            }
+        }
         static void Pump(int milliseconds)
         {
             var frame = new DispatcherFrame();
@@ -201,11 +210,11 @@ namespace SleepTimer
                 "Taskbar timer must be off by default");
             var area = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
             var target = new Rectangle(area.Right - 400, area.Bottom - 48, 140, 34);
-            int toggled = 0, cancelled = 0, menus = 0, wheel = 0, shifted = 0, suppressed = 0, covered = 0;
+            int toggled = 0, opened = 0, cancelled = 0, menus = 0, wheel = 0, shifted = 0, suppressed = 0, covered = 0;
             using (var mini = new TaskbarTimer(() => toggled++, () => cancelled++, () => menus++, (delta, keys) => wheel += delta,
                 (width, height) => System.Threading.Volatile.Read(ref suppressed) == 0
                     ? new Rectangle(target.X - System.Threading.Volatile.Read(ref shifted), target.Y, target.Width, target.Height) : (Rectangle?)null,
-                at => System.Threading.Volatile.Read(ref covered) == 0))
+                at => System.Threading.Volatile.Read(ref covered) == 0, () => opened++))
             {
                 mini.Update("2:25:00", "Shut down", TimerState.Running, .5, TimerTone.Running);
                 Pump(1000);
@@ -220,6 +229,8 @@ namespace SleepTimer
                 Check(Field<double>(Field<object>(mini, "ring"), "Fraction") == .5,
                     "Mini ring lost total-countdown progress");
                 CaptureControl((FrameworkElement)mini.Content, "wpf-taskbar-timer");
+                Check(Field<DispatcherTimer>(mini, "placement").Interval == TimeSpan.FromSeconds(30),
+                    "A settled widget must not keep polling accessibility or layout every 100 ms");
                 Console.WriteLine("CHECK: widget hit surface");
                 window.Hide(); Pump(50); Check(mini.IsVisible, "Mini timer disappeared with the main window");
                 window.Show();
@@ -260,7 +271,7 @@ namespace SleepTimer
                 System.Threading.Volatile.Write(ref shifted, 32);
                 System.Threading.Volatile.Write(ref covered, 0); Call(mini, "RefreshTaskbarLayer");
                 Check(!mini.IsVisible, "Returning from a game must not flash at the stale pre-DND position");
-                Field<Stopwatch>(mini, "probeAge").Reset(); Pump(100);
+                Call(mini, "QueueForegroundRefresh"); Pump(100);
                 Check(!mini.IsVisible, "Notification-area layout must settle before showing the timer");
                 try
                 {
@@ -275,8 +286,13 @@ namespace SleepTimer
                     throw;
                 }
                 Console.WriteLine("CHECK: widget pointer controls");
-                button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
-                    { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+                LeftClick(button);
+                Check(toggled == 0, "Single click must allow time for a double-click");
+                PumpUntil(() => toggled == 1, System.Windows.Forms.SystemInformation.DoubleClickTime + 1000, "Single click did not toggle the timer");
+                LeftClick(button); LeftClick(button, 2);
+                Pump(System.Windows.Forms.SystemInformation.DoubleClickTime + 50);
+                Check(opened == 1 && toggled == 1, "Double-click must open the app without toggling its timer");
+                LeftClick(button);
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
                     { RoutedEvent = UIElement.MouseRightButtonUpEvent });
                 Check(cancelled == 1 && menus == 0, "Right-click must cancel without opening a menu");
@@ -290,15 +306,18 @@ namespace SleepTimer
                 mini.Update("2:24:59", "Sleep", TimerState.Paused, .4, TimerTone.Paused);
                 Check(Field<TextBlock>(mini, "time").Text == "2:24:59" && button.ToolTip.ToString().Contains("Paused"),
                     "Paused mini timer is stale or missing state");
-                System.Threading.Volatile.Write(ref suppressed, 1); Pump(1600);
+                System.Threading.Volatile.Write(ref suppressed, 1); Call(mini, "QueueForegroundRefresh"); Pump(500);
                 Check(!mini.IsVisible, "Mini timer must hide when taskbar placement is unavailable");
                 var foregroundEvent = Field<Delegate>(mini, "foregroundChanged");
                 foregroundEvent.DynamicInvoke(IntPtr.Zero, (uint)3, IntPtr.Zero, 0, 0, (uint)0, (uint)0);
+                LeftClick(button);
                 mini.Dispose();
-                Pump(30); // A foreground refresh queued before disposal must be harmless.
+                Pump(System.Windows.Forms.SystemInformation.DoubleClickTime + 50);
+                Check(toggled == 1, "A pending click survived disposal or cancellation");
                 foregroundEvent.DynamicInvoke(IntPtr.Zero, (uint)3, IntPtr.Zero, 0, 0, (uint)0, (uint)0);
                 Check(!Field<DispatcherTimer>(mini, "placement").IsEnabled, "Mini timer polling survives disposal");
                 Check(Field<IntPtr>(mini, "foregroundHook") == IntPtr.Zero, "Mini timer foreground hook survives disposal");
+                Check(Field<IntPtr>(mini, "taskbarHook") == IntPtr.Zero, "Mini timer shell hook survives disposal");
             }
             Console.WriteLine("CHECK: default widget foreground transition");
             using (var defaults = new TaskbarTimer(() => { }, () => { }, () => { }, (delta, keys) => { }, (width, height) => target))
@@ -321,25 +340,23 @@ namespace SleepTimer
             }
             Console.WriteLine("CHECK: widget at-time controls");
             Call(window, "SetTaskbarTimer", true);
-            Console.WriteLine("CHECK: widget enabled");
             Check(Settings.Get("taskbar_timer", false) && Field<TaskbarTimer>(window, "taskbarTimer") != null,
                 "Mini timer setting is not saved or applied");
             var live = Field<TaskbarTimer>(window, "taskbarTimer");
             var countdown = Field<Countdown>(window, "countdown");
+            window.Hide(); LeftClick(Field<Border>(live, "button")); LeftClick(Field<Border>(live, "button"), 2);
+            Pump(System.Windows.Forms.SystemInformation.DoubleClickTime + 50);
+            Check(window.IsVisible && countdown.State == TimerState.Idle, "Widget double-click did not restore the app without starting its timer");
             Call(window, "SetMode", true); Set(window, "clockMinute", 6 * 60 + 20); Call(window, "UpdateView", false);
-            Console.WriteLine("CHECK: widget at-time ready");
             Check(countdown.State == TimerState.Idle && Field<TextBlock>(live, "time").Text == "At 06:20"
                 && Field<TextBlock>(live, "action").Text.Contains("Ready"), "Idle at-time widget must show the clock target and Ready");
             Field<Border>(live, "button").RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, 120)
                 { RoutedEvent = UIElement.MouseWheelEvent });
             Call(window, "UpdateView", false);
             Check(Field<int>(window, "clockMinute") == 6 * 60 + 25, "Widget scrolling did not edit the selected clock time");
-            Console.WriteLine("CHECK: widget at-time start");
             Call(window, "StartPause"); var deadline = countdown.TargetTime;
             Check(deadline.HasValue && Field<TextBlock>(live, "time").Text == "At 06:25", "At-time start did not use the absolute deadline");
-            Console.WriteLine("CHECK: widget at-time pause");
             Call(window, "StartPause"); double paused = countdown.Remaining; Pump(60);
-            Console.WriteLine("CHECK: widget at-time resume");
             Call(window, "StartPause");
             Check(countdown.TargetTime == deadline && countdown.Remaining < paused, "At-time resume shifted the selected deadline");
             Field<Border>(live, "button").RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
@@ -352,25 +369,21 @@ namespace SleepTimer
             Check(countdown.Duration == 2100, "Widget scrolling did not add five minutes in duration mode");
             countdown.SetDuration(1800); Call(window, "UpdateView", false);
             Call(window, "SetTaskbarTimer", false);
-            Console.WriteLine("CHECK: widget disabled");
             Check(!Settings.Get("taskbar_timer", true) && Field<TaskbarTimer>(window, "taskbarTimer") == null,
                 "Disabling mini timer failed to save or dispose it");
             Console.WriteLine("CHECK: widget menu quit window");
             var quitter = Open();
-            Console.WriteLine("CHECK: widget menu quit opened");
             try
             {
                 Set(quitter, "trayClick", quitter.PointToScreen(new System.Windows.Point(300, 450)));
                 Call(quitter, "ShowTrayMenu");
-                Console.WriteLine("CHECK: widget menu quit shown"); Pump(100);
-                Console.WriteLine("CHECK: widget menu quit click");
+                Pump(100);
                 var menu = Field<PopupMenu>(quitter, "trayMenu");
                 var quit = Field<StackPanel>(menu, "items").Children.OfType<Button>().Last();
                 quit.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
                 Check(!menu.Visible, "Quit did not dismiss the context menu immediately");
                 Check(!Field<bool>(quitter, "disposed"), "Quit must let the menu's mouse event finish before teardown");
                 Pump(100);
-                Console.WriteLine("CHECK: widget menu quit complete");
                 Check(Field<bool>(quitter, "disposed") && !quitter.IsVisible, "Deferred Quit did not close the app window");
             }
             finally { if (!Field<bool>(quitter, "disposed")) Close(quitter); }
@@ -388,6 +401,37 @@ namespace SleepTimer
                 Check(hiding.IsVisible, "Window cannot be restored after closing to tray");
             }
             finally { Close(hiding); }
+        }
+
+        static void CheckIdleScheduling(MainWindow window)
+        {
+            Console.WriteLine("CHECK: idle and background scheduling");
+            var ticker = Field<DispatcherTimer>(window, "ticker");
+            var countdown = Field<Countdown>(window, "countdown");
+            window.TestMode = false;
+            try
+            {
+                window.Hide(); Call(window, "UpdateView", false);
+                Check(!ticker.IsEnabled, "Hidden idle app must not wake a status timer");
+                Call(window, "SetAwake", -1);
+                Check(!ticker.IsEnabled, "Indefinite keep-awake needs no polling");
+                Call(window, "SetAwake", 15);
+                Check(ticker.IsEnabled && ticker.Interval <= TimeSpan.FromSeconds(1), "Timed keep-awake lost its expiry check");
+                Call(window, "SetAwake", 0); Call(window, "StartPause");
+                Check(ticker.IsEnabled && ticker.Interval == TimeSpan.FromSeconds(1), "Hidden countdown must update once a second");
+                window.Show();
+                Check(ticker.Interval == TimeSpan.FromMilliseconds(100), "Visible countdown lost smooth updates");
+                window.Hide(); Call(window, "StartPause");
+                Check(!ticker.IsEnabled && countdown.State == TimerState.Paused, "Paused hidden app must stop status polling");
+                Call(window, "Cancel"); Call(window, "AddTime", 300); Pump(350);
+                Check(!Field<bool>(window, "durationDirty") && Settings.Get("duration", 0) == 2100 && !ticker.IsEnabled,
+                    "Idle wheel edits must save without starting status polling");
+            }
+            finally
+            {
+                Call(window, "SetAwake", 0); Call(window, "Cancel"); countdown.SetDuration(1800); Settings.Set("duration", 1800);
+                window.TestMode = true; window.Show(); Call(window, "UpdateView", false);
+            }
         }
 
         [STAThread] static int Main()
@@ -424,6 +468,7 @@ namespace SleepTimer
                     var window = Open();
                     try
                     {
+                        CheckIdleScheduling(window);
                         CheckTaskbarTimer(window);
                         var countdown = Field<Countdown>(window, "countdown");
                         var face = Field<TimerFace>(window, "face");
@@ -533,7 +578,7 @@ namespace SleepTimer
                         Check(visual.Title == Field<TimerFace>(visual, "face").Time, "Hidden thumbnail title is not compact");
                         visual.Show(); countdown.Reset(); Call(visual, "UpdateView", false); Pump(50);
                         Check(visual.Title.Contains("Ready"), "Ready state missing from visible title");
-                        Check(Program.Version == "1.1", "Release version is not 1.1");
+                        Check(Program.Version == "1.2", "Release version is not 1.2");
                         Check(((FrameworkElement)visual.Content).ActualHeight >= 508, "Client area clips the footer");
                         Console.WriteLine("CHECK: font families and weights");
                         Check(AppFonts.All.Length >= 6 && AppFonts.All.Select(font => font.Key).Distinct().Count() == AppFonts.All.Length,
