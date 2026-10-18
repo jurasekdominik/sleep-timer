@@ -67,11 +67,15 @@ namespace SleepTimer
             stop.Tick += (s, e) => { stop.Stop(); frame.Continue = false; };
             stop.Start(); Dispatcher.PushFrame(frame);
         }
-        static MainWindow Open()
+        static MainWindow Open(bool trace = false)
         {
+            if (trace) Console.WriteLine("CHECK: window constructor");
             var window = new MainWindow { TestMode = true };
+            if (trace) Console.WriteLine("CHECK: window constructed");
             Field<DispatcherTimer>(window, "ticker").Stop();
-            window.Show(); window.UpdateLayout(); return window;
+            window.Show();
+            if (trace) Console.WriteLine("CHECK: window shown");
+            window.UpdateLayout(); return window;
         }
         static void Close(MainWindow window) { Set(window, "quitting", true); window.Close(); window.Dispose(); }
         static void Capture(MainWindow window, string name)
@@ -307,7 +311,7 @@ namespace SleepTimer
             Check(!Settings.Get("taskbar_timer", true) && Field<TaskbarTimer>(window, "taskbarTimer") == null,
                 "Disabling mini timer failed to save or dispose it");
             Console.WriteLine("CHECK: widget menu quit window");
-            var quitter = Open();
+            var quitter = Open(true);
             Console.WriteLine("CHECK: widget menu quit opened");
             try
             {
