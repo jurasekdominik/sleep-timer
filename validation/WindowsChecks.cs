@@ -203,13 +203,17 @@ namespace SleepTimer
                 Check(Field<double>(Field<object>(mini, "ring"), "Fraction") == .5,
                     "Mini ring lost total-countdown progress");
                 CaptureControl((FrameworkElement)mini.Content, "wpf-taskbar-timer");
+                Console.WriteLine("CHECK: widget hit surface");
                 window.Hide(); Pump(50); Check(mini.IsVisible, "Mini timer disappeared with the main window");
                 window.Show();
                 var button = Field<Border>(mini, "button");
                 Check(((SolidColorBrush)button.Background).Color.A == 1 && ((SolidColorBrush)mini.Background).Color.A == 0,
                     "Mini timer needs an almost invisible hit surface");
-                Check(WindowFromPoint(new Native.ScreenPoint { X = target.X + 2, Y = target.Y + 2 }) == new WindowInteropHelper(mini).Handle,
+                var hit = System.Threading.Tasks.Task.Run(() => WindowFromPoint(new Native.ScreenPoint { X = target.X + 2, Y = target.Y + 2 }));
+                for (int i = 0; i < 10 && !hit.IsCompleted; i++) Pump(100);
+                Check(hit.IsCompleted && hit.Result == new WindowInteropHelper(mini).Handle,
                     "Blank widget padding is click-through");
+                Console.WriteLine("CHECK: widget window layer");
                 using (var cover = new TaskbarTimer(() => { }, () => { }, () => { }, (delta, keys) => { }, (width, height) => target, at => true))
                 using (var game = new TaskbarTimer(() => { }, () => { }, () => { }, (delta, keys) => { }, (width, height) => target, at => true))
                 {
@@ -233,6 +237,7 @@ namespace SleepTimer
                     Call(mini, "FollowTaskbarLayer", coverHandle);
                     Check(GetWindow(miniHandle, 2) == coverHandle, "Taskbar activation must restore the timer directly above it");
                 }
+                Console.WriteLine("CHECK: widget layout settling");
                 System.Threading.Volatile.Write(ref covered, 1); Call(mini, "RefreshTaskbarLayer");
                 Check(!mini.IsVisible, "Covered taskbar must hide the timer without waiting for accessibility polling");
                 System.Threading.Volatile.Write(ref shifted, 32);
@@ -243,6 +248,7 @@ namespace SleepTimer
                 Pump(1100);
                 GetWindowRect(new WindowInteropHelper(mini).Handle, out var settled);
                 Check(mini.IsVisible && settled.Left == target.Left - 32, "Timer did not return at the settled notification-area edge");
+                Console.WriteLine("CHECK: widget pointer controls");
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
                     { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
@@ -264,6 +270,7 @@ namespace SleepTimer
                 Check(!Field<DispatcherTimer>(mini, "placement").IsEnabled, "Mini timer polling survives disposal");
                 Check(Field<IntPtr>(mini, "foregroundHook") == IntPtr.Zero, "Mini timer foreground hook survives disposal");
             }
+            Console.WriteLine("CHECK: widget at-time controls");
             Call(window, "SetTaskbarTimer", true);
             Check(Settings.Get("taskbar_timer", false) && Field<TaskbarTimer>(window, "taskbarTimer") != null,
                 "Mini timer setting is not saved or applied");
