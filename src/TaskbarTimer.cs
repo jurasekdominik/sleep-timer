@@ -15,8 +15,10 @@ namespace SleepTimer
     sealed class TaskbarTimer : Window, IDisposable
     {
         readonly Border button;
-        readonly TextBlock time = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 12, FontWeight = FontWeights.SemiBold };
-        readonly TextBlock action = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 11, FontWeight = FontWeights.Normal };
+        readonly TextBlock time = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 12, FontWeight = FontWeights.SemiBold,
+            TextAlignment = TextAlignment.Right, TextTrimming = TextTrimming.CharacterEllipsis };
+        readonly TextBlock action = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 11, FontWeight = FontWeights.Normal,
+            TextAlignment = TextAlignment.Right, TextTrimming = TextTrimming.CharacterEllipsis };
         readonly MiniRing ring = new MiniRing { Width = 28, Height = 28, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         readonly DispatcherTimer placement = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         readonly Func<int, int, PixelRectangle?> locate;
@@ -28,6 +30,7 @@ namespace SleepTimer
         readonly WinEventProc foregroundChanged;
         IntPtr foregroundHook;
         bool disposed;
+        bool foregroundRefreshQueued;
         string viewKey;
         PixelRectangle? previous;
         PixelRectangle? pending;
@@ -78,20 +81,27 @@ namespace SleepTimer
             SourceInitialized += (s, e) =>
             {
                 source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+                // This tiny transparent surface does not need a GPU-backed render target.
+                // Keep its composition independent of device changes during screen capture.
+                source.CompositionTarget.RenderMode = RenderMode.SoftwareOnly;
                 // Keep the user's current app focused, including when clicking the timer.
                 SetWindowLong(source.Handle, -20, (GetWindowLong(source.Handle, -20) | 0x08000080) & ~0x00040000);
                 source.AddHook(WindowMessage);
             };
             foregroundChanged = (hook, message, window, objectId, childId, thread, stamp) =>
             {
-                if (!disposed) Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() =>
+                if (disposed || Dispatcher.HasShutdownStarted || foregroundRefreshQueued) return;
+                foregroundRefreshQueued = true;
+                try { Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() =>
                 {
+                    foregroundRefreshQueued = false;
                     if (disposed) return;
                     RefreshTaskbarLayer();
                     var at = pending ?? previous;
-                    if (waitingForLayout && probe == null && at.HasValue && canShow(at.Value)) probeAge.Reset();
+                    if (waitingForLayout && probe == null && at.HasValue && this.canShow(at.Value)) probeAge.Reset();
                     RefreshPlacement();
-                }));
+                })); }
+                catch (InvalidOperationException) { foregroundRefreshQueued = false; } // Dispatcher stopped during the native callback.
             };
             // Follow both taskbar activation and games becoming foreground, without taking focus.
             foregroundHook = SetWinEventHook(3, 3, IntPtr.Zero, foregroundChanged, 0, 0, 2);
@@ -163,11 +173,7 @@ namespace SleepTimer
                 var at = previous.Value;
                 SetWindowPos(source.Handle, IntPtr.Zero, at.X, at.Y, at.Width, at.Height, 0x0214);
             }
-            if (TaskbarLocator.IsShellOverlayForeground())
-                // Start/Search have screen-sized host windows. Keep the taskbar timer above
-                // that shell surface without activating it; games still use the taskbar layer.
-                SetWindowPos(source.Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x0213);
-            else FollowTaskbarLayer(FindWindow("Shell_TrayWnd", null));
+            FollowTaskbarLayer(FindWindow("Shell_TrayWnd", null));
         }
 
         void FollowTaskbarLayer(IntPtr taskbar)

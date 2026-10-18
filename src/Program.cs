@@ -21,6 +21,11 @@ namespace SleepTimer
             try { Native.SetDllDirectory(""); } catch { }
             if (!SingleInstance.Claim()) return;
             var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            app.DispatcherUnhandledException += (s, e) => CrashLog.Write(e.Exception);
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            {
+                if (e.ExceptionObject is Exception error) CrashLog.Write(error);
+            };
             Theme.Init(app);
             using (var window = new MainWindow())
             {

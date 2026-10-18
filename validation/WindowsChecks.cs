@@ -211,6 +211,8 @@ namespace SleepTimer
                 Pump(1000);
                 Check(mini.IsVisible && !mini.ShowInTaskbar && !mini.ShowActivated && mini.Owner == null,
                     "Mini timer must appear independently without an extra taskbar button or activation");
+                Check(HwndSource.FromHwnd(new WindowInteropHelper(mini).Handle).CompositionTarget.RenderMode == RenderMode.SoftwareOnly,
+                    "Transparent taskbar timer must use software composition through capture/display transitions");
                 GetWindowRect(new WindowInteropHelper(mini).Handle, out var bounds);
                 Check(bounds.Left == target.Left && bounds.Top == target.Top, "Mini timer ignored physical taskbar bounds");
                 Check(Field<TextBlock>(mini, "time").Text == "2:25:00"
@@ -290,9 +292,25 @@ namespace SleepTimer
                     "Paused mini timer is stale or missing state");
                 System.Threading.Volatile.Write(ref suppressed, 1); Pump(1600);
                 Check(!mini.IsVisible, "Mini timer must hide when taskbar placement is unavailable");
+                var foregroundEvent = Field<Delegate>(mini, "foregroundChanged");
+                foregroundEvent.DynamicInvoke(IntPtr.Zero, (uint)3, IntPtr.Zero, 0, 0, (uint)0, (uint)0);
                 mini.Dispose();
+                Pump(30); // A foreground refresh queued before disposal must be harmless.
+                foregroundEvent.DynamicInvoke(IntPtr.Zero, (uint)3, IntPtr.Zero, 0, 0, (uint)0, (uint)0);
                 Check(!Field<DispatcherTimer>(mini, "placement").IsEnabled, "Mini timer polling survives disposal");
                 Check(Field<IntPtr>(mini, "foregroundHook") == IntPtr.Zero, "Mini timer foreground hook survives disposal");
+            }
+            Console.WriteLine("CHECK: default widget foreground transition");
+            using (var defaults = new TaskbarTimer(() => { }, () => { }, () => { }, (delta, keys) => { }, (width, height) => target))
+            {
+                Field<DispatcherTimer>(defaults, "placement").Stop();
+                Set(defaults, "previous", (Rectangle?)target); Set(defaults, "pending", null);
+                Set(defaults, "probe", null); Set(defaults, "waitingForLayout", true);
+                var foreground = Field<Delegate>(defaults, "foregroundChanged");
+                for (int i = 0; i < 20; i++)
+                    foreground.DynamicInvoke(IntPtr.Zero, (uint)3, IntPtr.Zero, 0, 0, (uint)0, (uint)0);
+                Pump(50);
+                Check(!Field<bool>(defaults, "foregroundRefreshQueued"), "Default foreground refresh never completed");
             }
             Console.WriteLine("CHECK: widget at-time controls");
             Call(window, "SetTaskbarTimer", true);
@@ -371,6 +389,19 @@ namespace SleepTimer
                     Settings.Set("validation_bool", 0); Check(!Settings.Get("validation_bool", true), "DWORD false setting was ignored");
                     var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                     Theme.Init(app);
+                    var reportedMethod = typeof(Window).Module.ResolveMethod(0x06000db3);
+                    Console.WriteLine("WPF runtime: " + FileVersionInfo.GetVersionInfo(typeof(Window).Assembly.Location).FileVersion
+                        + "; reported method 0xdb3: " + reportedMethod.DeclaringType.FullName + "." + reportedMethod);
+                    string crashDirectory = Path.Combine(Path.GetTempPath(), "SleepTimer-crash-check-" + Guid.NewGuid().ToString("N"));
+                    try
+                    {
+                        CrashLog.Write(new InvalidOperationException("Capture diagnostic check"), crashDirectory);
+                        string logPath = Path.Combine(crashDirectory, "last-crash.log");
+                        Check(File.ReadAllText(logPath).Contains("System.InvalidOperationException: Capture diagnostic check"),
+                            "Crash log did not preserve the exception");
+                        CrashLog.Write(new Exception("Logging must not throw"), logPath); // A file cannot be a directory.
+                    }
+                    finally { if (Directory.Exists(crashDirectory)) Directory.Delete(crashDirectory, true); }
                     var window = Open();
                     try
                     {
