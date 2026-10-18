@@ -342,12 +342,12 @@ namespace SleepTimer
         public bool ContainsDial(Point p) => InRing(p);
         public void Scroll(int wheelDelta, ModifierKeys keys)
         {
-                if (!Interactive) return;
-                int minutes = (keys & (ModifierKeys.Control | ModifierKeys.Shift)) == (ModifierKeys.Control | ModifierKeys.Shift) ? 60
-                    : (keys & ModifierKeys.Control) != 0 ? 30 : (keys & ModifierKeys.Shift) != 0 ? 15
-                    : (keys & ModifierKeys.Alt) != 0 ? 1 : 5;
-                int delta = input.Add(wheelDelta, minutes * 60);
-                if (delta != 0) Wheel?.Invoke(delta);
+            if (!Interactive) return;
+            int minutes = (keys & (ModifierKeys.Control | ModifierKeys.Shift)) == (ModifierKeys.Control | ModifierKeys.Shift) ? 60
+                : (keys & ModifierKeys.Control) != 0 ? 30 : (keys & ModifierKeys.Shift) != 0 ? 15
+                : (keys & ModifierKeys.Alt) != 0 ? 1 : 5;
+            int delta = input.Add(wheelDelta, minutes * 60);
+            if (delta != 0) Wheel?.Invoke(delta);
         }
 
         bool InRing(Point p) => Interactive && Math.Pow(p.X - ActualWidth / 2, 2) + Math.Pow(p.Y - ActualHeight / 2, 2) <= 158 * 158;

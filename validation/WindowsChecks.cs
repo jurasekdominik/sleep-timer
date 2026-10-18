@@ -308,10 +308,12 @@ namespace SleepTimer
                 "Disabling mini timer failed to save or dispose it");
             Console.WriteLine("CHECK: widget menu quit window");
             var quitter = Open();
+            Console.WriteLine("CHECK: widget menu quit opened");
             try
             {
                 Set(quitter, "trayClick", quitter.PointToScreen(new System.Windows.Point(300, 450)));
-                Call(quitter, "ShowTrayMenu"); Pump(100);
+                Call(quitter, "ShowTrayMenu");
+                Console.WriteLine("CHECK: widget menu quit shown"); Pump(100);
                 Console.WriteLine("CHECK: widget menu quit click");
                 var menu = Field<PopupMenu>(quitter, "trayMenu");
                 var quit = Field<StackPanel>(menu, "items").Children.OfType<Button>().Last();
