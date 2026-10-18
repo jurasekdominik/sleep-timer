@@ -611,7 +611,7 @@ namespace SleepTimer
                 taskbarTimer = new TaskbarTimer(StartPause, () =>
                 {
                     Native.GetPhysicalCursorPos(out var point);
-                    trayClick = new Point(point.X, point.Y); ShowTrayMenu();
+                    trayClick = new Point(point.X, point.Y); OpenTrayMenu(false);
                 });
             UpdateView();
         }
@@ -854,12 +854,13 @@ namespace SleepTimer
             return menu;
         }
         void SetTrayPage(int page) { trayPage = page; trayMenu.SetRows(TrayRows()); }
-        void ShowTrayMenu()
+        void ShowTrayMenu() => OpenTrayMenu(true);
+        void OpenTrayMenu(bool activate)
         {
             // Native tray clicks do not bubble through a WPF anchor button.
             // Honor a fresh request even if an earlier popup just lost capture.
             if (trayMenu.Visible || disposed) return;
-            Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
+            if (activate) Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
             trayPage = 0; trayMenu.Show(TrayRows(), this, screenPosition: trayClick);
         }
         void SetAwake(int minutes)
@@ -1029,7 +1030,11 @@ namespace SleepTimer
             return dialog.ShowDialog() == true;
         }
         public void EndSession() { sessionEnding = quitting = true; }
-        void Quit() { quitting = true; Close(); }
+        void Quit()
+        {
+            // Let the menu finish releasing mouse capture before closing windows and tray handles.
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() => { if (!disposed) { quitting = true; Close(); } }));
+        }
         IntPtr WindowMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (msg == 0x0312)

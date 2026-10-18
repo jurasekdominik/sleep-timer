@@ -20,6 +20,9 @@ namespace SleepTimer
         [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
         [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+        [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
+        [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out Rect value, int size);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int count);
 
         // Called on a worker thread: Explorer's accessibility provider can be slow or unavailable.
@@ -32,14 +35,6 @@ namespace SleepTimer
                 var monitor = MonitorFromWindow(bar, 2);
                 var info = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
                 if (!GetMonitorInfo(monitor, ref info)) return null;
-                var foreground = GetForegroundWindow();
-                var foregroundClass = new StringBuilder(256);
-                GetClassName(foreground, foregroundClass, foregroundClass.Capacity);
-                if (foreground != IntPtr.Zero && foreground != bar
-                    && foregroundClass.ToString() != "Progman" && foregroundClass.ToString() != "WorkerW"
-                    && MonitorFromWindow(foreground, 2) == monitor && GetWindowRect(foreground, out var front)
-                    && front.Value.Contains(info.Bounds.Value)) return null;
-
                 var root = AutomationElement.FromHandle(bar);
                 var buttons = root.FindAll(TreeScope.Descendants,
                     new OrCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
@@ -78,6 +73,28 @@ namespace SleepTimer
             catch (InvalidOperationException) { return null; }
             catch (COMException) { return null; }
             catch (System.ComponentModel.Win32Exception) { return null; }
+        }
+
+        // No accessibility calls here: foreground and auto-hide changes must not wait for Explorer.
+        public static bool CanShow(Rectangle target)
+        {
+            var bar = FindWindow("Shell_TrayWnd", null);
+            if (bar == IntPtr.Zero || !IsWindowVisible(bar) || !GetWindowRect(bar, out var bounds)
+                || !bounds.Value.Contains(target)) return false;
+            var info = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
+            if (!GetMonitorInfo(MonitorFromWindow(bar, 2), ref info) || !info.Bounds.Value.Contains(target)) return false;
+            var foreground = GetForegroundWindow();
+            if (foreground == IntPtr.Zero || foreground == bar) return true;
+            GetWindowThreadProcessId(foreground, out uint process);
+            if (process == GetCurrentProcessId()) return true; // Our context menu may overlap the timer.
+            var name = new StringBuilder(256);
+            GetClassName(foreground, name, name.Capacity);
+            if (name.ToString() == "Progman" || name.ToString() == "WorkerW") return true;
+            // Test the actual timer area, rather than requiring an exact full-monitor window size.
+            // This includes borderless games with small frame/DPI differences.
+            if (DwmGetWindowAttribute(foreground, 9, out var front, Marshal.SizeOf(typeof(Rect))) != 0
+                && !GetWindowRect(foreground, out front)) return true;
+            return !front.Value.Contains(target);
         }
 
         static Rectangle Pixels(System.Windows.Rect value) => Rectangle.FromLTRB((int)Math.Floor(value.Left),

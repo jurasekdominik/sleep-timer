@@ -185,9 +185,10 @@ namespace SleepTimer
                 "Taskbar timer must be off by default");
             var area = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
             var target = new Rectangle(area.Right - 400, area.Bottom - 48, 124, 32);
-            int toggled = 0, menus = 0, suppressed = 0;
+            int toggled = 0, menus = 0, suppressed = 0, covered = 0;
             using (var mini = new TaskbarTimer(() => toggled++, () => menus++,
-                (width, height) => System.Threading.Volatile.Read(ref suppressed) == 0 ? target : (Rectangle?)null))
+                (width, height) => System.Threading.Volatile.Read(ref suppressed) == 0 ? target : (Rectangle?)null,
+                at => System.Threading.Volatile.Read(ref covered) == 0))
             {
                 mini.Update("2:25:00", "Shut down", TimerState.Running, .5, TimerTone.Running);
                 Pump(700);
@@ -205,25 +206,38 @@ namespace SleepTimer
                 var button = Field<Border>(mini, "button");
                 Check(((SolidColorBrush)button.Background).Color.A == 0 && ((SolidColorBrush)mini.Background).Color.A == 0,
                     "Mini timer still paints an opaque background");
-                using (var cover = new TaskbarTimer(() => { }, () => { }, (width, height) => target))
+                using (var cover = new TaskbarTimer(() => { }, () => { }, (width, height) => target, at => true))
+                using (var game = new TaskbarTimer(() => { }, () => { }, (width, height) => target, at => true))
                 {
                     cover.Update("Cover", "Taskbar stand-in", TimerState.Idle, 1, TimerTone.Idle);
+                    game.Update("Game", "Covering app", TimerState.Idle, 1, TimerTone.Idle);
                     Pump(700);
                     var miniHandle = new WindowInteropHelper(mini).Handle;
                     var coverHandle = new WindowInteropHelper(cover).Handle;
+                    var gameHandle = new WindowInteropHelper(game).Handle;
                     SetWindowPos(coverHandle, (IntPtr)(-1), 0, 0, 0, 0, 0x0213);
-                    Check(IsAbove(coverHandle, miniHandle), "Could not simulate the taskbar rising above the timer");
+                    SetWindowPos(gameHandle, (IntPtr)(-1), 0, 0, 0, 0, 0x0213);
+                    SetWindowPos(miniHandle, (IntPtr)(-1), 0, 0, 0, 0, 0x0213);
                     var foreground = GetForegroundWindow();
-                    Call(mini, "KeepAbove", coverHandle);
-                    Check(IsAbove(miniHandle, coverHandle), "Mini timer did not restore its order above the taskbar");
+                    Call(mini, "FollowTaskbarLayer", coverHandle);
+                    Check(IsAbove(gameHandle, miniHandle) && IsAbove(miniHandle, coverHandle),
+                        "Mini timer must sit between the taskbar and the app covering it");
                     Check(GetForegroundWindow() == foreground, "Restoring mini timer order stole keyboard focus");
                     GetWindowRect(miniHandle, out var raised);
                     Check(raised.Left == target.Left && raised.Top == target.Top, "Restoring order moved the mini timer");
+                    SetWindowPos(coverHandle, (IntPtr)(-1), 0, 0, 0, 0, 0x0213);
+                    Call(mini, "FollowTaskbarLayer", coverHandle);
+                    Check(GetWindow(miniHandle, 2) == coverHandle, "Taskbar activation must restore the timer directly above it");
                 }
+                System.Threading.Volatile.Write(ref covered, 1); Call(mini, "RefreshTaskbarLayer");
+                Check(!mini.IsVisible, "Covered taskbar must hide the timer without waiting for accessibility polling");
+                System.Threading.Volatile.Write(ref covered, 0); Call(mini, "RefreshTaskbarLayer");
+                Check(mini.IsVisible, "Taskbar timer must return immediately when its area is exposed");
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
                     { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
                     { RoutedEvent = UIElement.MouseRightButtonUpEvent });
+                Check(menus == 0, "Widget menu opened inside the mouse event"); Pump(30);
                 Check(toggled == 1 && menus == 1, "Mini timer click actions were not dispatched once");
                 mini.Update("2:24:59", "Sleep", TimerState.Paused, .4, TimerTone.Paused);
                 Check(Field<TextBlock>(mini, "time").Text == "2:24:59" && button.ToolTip.ToString().Contains("Paused"),
@@ -240,6 +254,15 @@ namespace SleepTimer
             Call(window, "SetTaskbarTimer", false);
             Check(!Settings.Get("taskbar_timer", true) && Field<TaskbarTimer>(window, "taskbarTimer") == null,
                 "Disabling mini timer failed to save or dispose it");
+            var quitter = Open();
+            try
+            {
+                Call(quitter, "Quit");
+                Check(!Field<bool>(quitter, "disposed"), "Quit must let the menu's mouse event finish before teardown");
+                Pump(100);
+                Check(Field<bool>(quitter, "disposed") && !quitter.IsVisible, "Deferred Quit did not close the app window");
+            }
+            finally { if (!Field<bool>(quitter, "disposed")) Close(quitter); }
         }
 
         [STAThread] static int Main()

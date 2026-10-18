@@ -18,8 +18,9 @@ namespace SleepTimer
         readonly TextBlock time = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 12, FontWeight = FontWeights.SemiBold };
         readonly TextBlock action = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 11, FontWeight = FontWeights.Normal };
         readonly MiniRing ring = new MiniRing { Width = 22, Height = 22, Margin = new Thickness(0, 0, 6, 0) };
-        readonly DispatcherTimer placement = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        readonly DispatcherTimer placement = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         readonly Func<int, int, PixelRectangle?> locate;
+        readonly Func<PixelRectangle, bool> canShow;
         readonly Stopwatch probeAge = new Stopwatch();
         Task<PixelRectangle?> probe;
         HwndSource source;
@@ -33,18 +34,19 @@ namespace SleepTimer
         [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string name, string title);
         [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
-        [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
         delegate void WinEventProc(IntPtr hook, uint message, IntPtr window, int objectId, int childId, uint thread, uint time);
         [DllImport("user32.dll")] static extern IntPtr SetWinEventHook(uint first, uint last, IntPtr module,
             WinEventProc callback, uint process, uint thread, uint flags);
         [DllImport("user32.dll")] static extern bool UnhookWinEvent(IntPtr hook);
 
-        public TaskbarTimer(Action toggle, Action menu, Func<int, int, PixelRectangle?> locate = null)
+        public TaskbarTimer(Action toggle, Action menu, Func<int, int, PixelRectangle?> locate = null,
+            Func<PixelRectangle, bool> canShow = null)
         {
             this.locate = locate ?? TaskbarLocator.Locate;
+            this.canShow = canShow ?? TaskbarLocator.CanShow;
             Title = "Sleep Timer · taskbar timer"; Width = 124; Height = 32;
             WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize;
-            ShowInTaskbar = ShowActivated = false; Topmost = true; AllowsTransparency = true; Background = Brushes.Transparent;
+            ShowInTaskbar = ShowActivated = false; AllowsTransparency = true; Background = Brushes.Transparent;
             UseLayoutRounding = SnapsToDevicePixels = true;
             FontFamily = new FontFamily("Segoe UI"); FontWeight = FontWeights.Normal;
             TextOptions.SetTextFormattingMode(this, TextFormattingMode.Ideal);
@@ -60,7 +62,11 @@ namespace SleepTimer
             action.SetResourceReference(TextBlock.ForegroundProperty, "SecondBrush");
             Content = button;
             button.MouseLeftButtonUp += (s, e) => { toggle(); e.Handled = true; };
-            button.MouseRightButtonUp += (s, e) => { menu(); e.Handled = true; };
+            button.MouseRightButtonUp += (s, e) =>
+            {
+                Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() => { if (!disposed) menu(); }));
+                e.Handled = true;
+            };
             SourceInitialized += (s, e) =>
             {
                 source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
@@ -70,12 +76,10 @@ namespace SleepTimer
             };
             foregroundChanged = (hook, message, window, objectId, childId, thread, stamp) =>
             {
-                var taskbar = FindWindow("Shell_TrayWnd", null);
-                if (!disposed && taskbar != IntPtr.Zero && GetAncestor(window, 2) == taskbar)
-                    Dispatcher.BeginInvoke(DispatcherPriority.Send, (Action)(() => KeepAbove(taskbar)));
+                if (!disposed)
+                    Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)RefreshTaskbarLayer);
             };
-            // Explorer raises its own topmost window when the taskbar is clicked.
-            // Restore our relative order without activating the timer or changing focus.
+            // Follow both taskbar activation and games becoming foreground, without taking focus.
             foregroundHook = SetWinEventHook(3, 3, IntPtr.Zero, foregroundChanged, 0, 0, 2);
             Closed += (s, e) =>
             {
@@ -96,7 +100,7 @@ namespace SleepTimer
         void RefreshPlacement()
         {
             if (disposed) return;
-            KeepAbove(FindWindow("Shell_TrayWnd", null));
+            RefreshTaskbarLayer();
             if (probe != null)
             {
                 if (!probe.IsCompleted)
@@ -109,32 +113,39 @@ namespace SleepTimer
                 if (probe.IsFaulted) { var ignored = probe.Exception; }
                 probe = null;
                 if (!bounds.HasValue) { Hide(); previous = null; }
-                else if (!IsVisible || previous != bounds)
+                else if (previous != bounds)
                 {
                     var at = bounds.Value;
-                    SetWindowPos(source.Handle, (IntPtr)(-1), at.X, at.Y, at.Width, at.Height, 0x0210);
-                    if (!IsVisible) Show();
-                    SetWindowPos(source.Handle, (IntPtr)(-1), at.X, at.Y, at.Width, at.Height, 0x0210);
+                    SetWindowPos(source.Handle, IntPtr.Zero, at.X, at.Y, at.Width, at.Height, 0x0214); // retain layer
                     previous = at;
                 }
+                RefreshTaskbarLayer();
             }
             if (probeAge.IsRunning && probeAge.ElapsedMilliseconds < 1000) return;
             int width = (int)Width, height = (int)Height;
             probeAge.Restart(); probe = Task.Run(() => locate(width, height));
         }
 
-        void KeepAbove(IntPtr taskbar)
+        void RefreshTaskbarLayer()
+        {
+            if (disposed || !previous.HasValue) return;
+            if (!canShow(previous.Value)) { Hide(); return; }
+            if (!IsVisible)
+            {
+                Show();
+                var at = previous.Value;
+                SetWindowPos(source.Handle, IntPtr.Zero, at.X, at.Y, at.Width, at.Height, 0x0214);
+            }
+            FollowTaskbarLayer(FindWindow("Shell_TrayWnd", null));
+        }
+
+        void FollowTaskbarLayer(IntPtr taskbar)
         {
             if (disposed || !IsVisible || taskbar == IntPtr.Zero) return;
-            // Only raise when Explorer actually covers us. Leave menus and other
-            // topmost windows alone when the taskbar is already underneath.
-            int remaining = 256; // Bound the walk if another process changes window order during it.
-            for (var above = GetWindow(source.Handle, 3); above != IntPtr.Zero && remaining-- > 0; above = GetWindow(above, 3))
-                if (above == taskbar)
-                {
-                    SetWindowPos(source.Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x0213); // no move, size or activation
-                    return;
-                }
+            var above = GetWindow(taskbar, 3); // Window immediately above Explorer in the native Z order.
+            if (above == source.Handle) return;
+            // Insert between the taskbar and whatever covers it; never jump above that covering app.
+            SetWindowPos(source.Handle, above == IntPtr.Zero ? (IntPtr)(-1) : above, 0, 0, 0, 0, 0x0213);
         }
 
         public void Update(string value, string actionLabel, TimerState state, double fraction, TimerTone tone)
