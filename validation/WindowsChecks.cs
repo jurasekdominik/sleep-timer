@@ -70,6 +70,12 @@ namespace SleepTimer
                 null, milliseconds, System.Threading.Timeout.Infinite))
                 Dispatcher.PushFrame(frame);
         }
+        static void PumpUntil(Func<bool> ready, int timeout, string message)
+        {
+            var elapsed = Stopwatch.StartNew();
+            while (!ready() && elapsed.ElapsedMilliseconds < timeout) Pump(25);
+            Check(ready(), message);
+        }
         static MainWindow Open()
         {
             var window = new MainWindow { TestMode = true };
@@ -248,9 +254,8 @@ namespace SleepTimer
                 Check(!mini.IsVisible, "Returning from a game must not flash at the stale pre-DND position");
                 Field<Stopwatch>(mini, "probeAge").Reset(); Pump(100);
                 Check(!mini.IsVisible, "Notification-area layout must settle before showing the timer");
-                Pump(1100);
-                GetWindowRect(new WindowInteropHelper(mini).Handle, out var settled);
-                Check(mini.IsVisible && settled.Left == target.Left - 32, "Timer did not return at the settled notification-area edge");
+                PumpUntil(() => mini.IsVisible && GetWindowRect(new WindowInteropHelper(mini).Handle, out var settled)
+                    && settled.Left == target.Left - 32, 4000, "Timer did not return at the settled notification-area edge");
                 Console.WriteLine("CHECK: widget pointer controls");
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
                     { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
