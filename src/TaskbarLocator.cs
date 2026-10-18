@@ -23,6 +23,7 @@ namespace SleepTimer
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
         [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
         [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out Rect value, int size);
+        [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int count);
 
         // Called on a worker thread: Explorer's accessibility provider can be slow or unavailable.
@@ -81,6 +82,7 @@ namespace SleepTimer
             var bar = FindWindow("Shell_TrayWnd", null);
             if (bar == IntPtr.Zero || !IsWindowVisible(bar) || !GetWindowRect(bar, out var bounds)
                 || !bounds.Value.Contains(target)) return false;
+            if (DwmGetWindowAttribute(bar, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return false;
             var info = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
             if (!GetMonitorInfo(MonitorFromWindow(bar, 2), ref info) || !info.Bounds.Value.Contains(target)) return false;
             var foreground = GetForegroundWindow();
@@ -92,7 +94,7 @@ namespace SleepTimer
             if (name.ToString() == "Progman" || name.ToString() == "WorkerW") return true;
             // Test the actual timer area, rather than requiring an exact full-monitor window size.
             // This includes borderless games with small frame/DPI differences.
-            if (DwmGetWindowAttribute(foreground, 9, out var front, Marshal.SizeOf(typeof(Rect))) != 0
+            if (DwmGetWindowAttribute(foreground, 9, out Rect front, Marshal.SizeOf(typeof(Rect))) != 0
                 && !GetWindowRect(foreground, out front)) return true;
             return !front.Value.Contains(target);
         }
