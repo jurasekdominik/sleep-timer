@@ -41,9 +41,8 @@ namespace SleepTimer
             catch (ArgumentException) { return true; }
         }
 
-        internal static int OwnerExitProbe(string output, Action<int> pump)
+        internal static int OwnerExitProbe(string output, IntPtr parent, Action<int> pump)
         {
-            var parent = Parent();
             var owner = new HwndSource(new HwndSourceParameters("Native owner exit probe") { WindowStyle = 0 });
             var host = new NativeTaskbarHost(owner.Handle, parent, () => { }, () => { }, () => { }, () => { }, () => { }, (delta, keys) => { });
             owner.AddHook((IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled) =>
@@ -123,15 +122,26 @@ namespace SleepTimer
                         "A native helper failure did not restore WPF");
                     pump(300); Check(Field<bool>(widget, "nativeFailed"), "Failed native helper was automatically respawned");
                 }
+                Console.WriteLine("CHECK: native taskbar parent-loss cleanup");
+                using (var widget = new TaskbarTimer(() => { }, () => { }, () => { }, (delta, keys) => { },
+                    (width, height) => target, bounds => true, preferNative: true, nativeParent: parent))
+                {
+                    widget.Update("1:00:00", "Sleep", TimerState.Idle, 1, TimerTone.Idle);
+                    Until(() => widget.RendererDescription == "Native", pump, "Second native renderer never attached");
+                    int id = Field<Process>(Field<NativeTaskbarHost>(widget, "native"), "process").Id;
+                    DestroyWindow(parent); parent = IntPtr.Zero;
+                    Until(() => Gone(id), pump, "Native helper survived destruction of its taskbar parent");
+                }
             }
-            finally { DestroyWindow(parent); }
+            finally { if (parent != IntPtr.Zero) DestroyWindow(parent); }
 
             Console.WriteLine("CHECK: native helper owner-loss cleanup");
             string report = Path.Combine(Path.GetTempPath(), "sleep-timer-owner-" + Guid.NewGuid().ToString("N") + ".txt");
+            var survivingParent = Parent();
             try
             {
                 using (var probe = Process.Start(new ProcessStartInfo(Assembly.GetExecutingAssembly().Location,
-                    "--native-owner-test \"" + report + "\"") { UseShellExecute = false, CreateNoWindow = true }))
+                    "--native-owner-test \"" + report + "\" " + survivingParent.ToInt64().ToString("X")) { UseShellExecute = false, CreateNoWindow = true }))
                 {
                     try { Until(() => probe.HasExited, pump, "Native owner probe did not exit", 10000); }
                     finally { if (!probe.HasExited) probe.Kill(); }
@@ -140,7 +150,7 @@ namespace SleepTimer
                 int child = int.Parse(File.ReadAllText(report));
                 Until(() => Gone(child), pump, "Native helper survived its owner process");
             }
-            finally { if (File.Exists(report)) File.Delete(report); }
+            finally { if (File.Exists(report)) File.Delete(report); DestroyWindow(survivingParent); }
         }
     }
 }

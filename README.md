@@ -38,13 +38,17 @@ Choose an action, set a duration or a clock time, and click the circle to start.
 
 Keep awake prevents automatic sleep, with an option to keep the screen on. Right-click the tray icon for quick timers and keep-awake options. Add your own timer presets in Settings using whole minutes (`90`) or hours (`2h`).
 
-Enable the mini timer in Settings → General → Taskbar timer. Click it to start, pause or resume; double-click to open the app, right-click to cancel, middle-click for the menu, and scroll to adjust. It hides with the taskbar, behind fullscreen or Windows overlays such as Start and screen clipping, or when there is no room.
+Enable the mini timer in Settings → General → Taskbar timer. Click it to start, pause or resume; double-click to open the app, right-click to cancel, middle-click for the menu, and scroll to adjust. It follows taskbar visibility and hides behind fullscreen apps or when there is no room. Compatible WPF rendering may also hide behind Start and screen clipping.
+
+Native rendering is available as a preview from the dropdown below Taskbar timer. It attaches the mini timer to the taskbar and falls back to WPF if unavailable. Choose Compatible (WPF) to use the existing renderer.
 
 Closing the window hides it to the tray. Double-click the tray icon to reopen it, or choose Quit from its menu.
 
 ## Build
 
 Install .NET SDK 8 and run `build.cmd`. It creates `SleepTimer.exe` in the project folder.
+
+To include the native preview, install Visual Studio C++ build tools, the Windows SDK and CMake, then run `build.cmd --native`. The portable executable includes the helper; users do not need those build tools. See [native taskbar development](docs/NATIVE_TASKBAR.md).
 
 ## License
 

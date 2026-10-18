@@ -234,6 +234,9 @@ namespace SleepTimer
             if (!CanPresent(candidate.Value)) { waitingForLayout = true; pending = null; HideSurfaces(); return; }
             if (waitingForLayout) return;
             EnsureNative();
+            // Do not warm up WPF's widget renderer for a healthy native launch.
+            // Startup is bounded; failures return here and show the compatibility surface.
+            if (native?.Starting == true) { if (IsVisible) Hide(); return; }
             if (native?.Ready == true)
             {
                 if (IsVisible) Hide();

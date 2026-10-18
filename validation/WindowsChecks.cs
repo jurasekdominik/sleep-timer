@@ -475,7 +475,8 @@ namespace SleepTimer
 
         [STAThread] static int Main(string[] args)
         {
-            if (args.Length == 2 && args[0] == "--native-owner-test") return NativeChecks.OwnerExitProbe(args[1], Pump);
+            if (args.Length == 3 && args[0] == "--native-owner-test")
+                return NativeChecks.OwnerExitProbe(args[1], new IntPtr(long.Parse(args[2], System.Globalization.NumberStyles.HexNumber)), Pump);
             // Preserve the caller's settings. No expiry polling or power action runs in this suite.
             using (var key = Registry.CurrentUser.CreateSubKey(@"Software\SleepTimer"))
             {

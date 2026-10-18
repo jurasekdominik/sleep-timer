@@ -45,6 +45,7 @@ namespace SleepTimer
         IntPtr window;
         bool disposed;
         public bool Ready => !disposed && window != IntPtr.Zero;
+        public bool Starting => !disposed && process != null && window == IntPtr.Zero;
         public string Failure { get; private set; }
 
         internal NativeTaskbarHost(IntPtr owner, IntPtr parent, Action changed, Action toggle, Action cancel,

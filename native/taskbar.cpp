@@ -77,7 +77,7 @@ struct Renderer {
         if (!surface.resize(view.width, view.height)) return false;
         if (!target) {
             auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE,
-                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
             if (FAILED(factory->CreateDCRenderTarget(&properties, target.GetAddressOf()))) return false;
             target->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
         }
@@ -137,8 +137,8 @@ struct Host {
     void input(taskbar::Command command, short delta = 0) noexcept {
         KillTimer(window, taskbar::clickTimer);
         clickPending = false;
-        unsigned modifiers = ((GetKeyState(VK_MENU) & 0x8000) ? 1u : 0u)
-            | ((GetKeyState(VK_CONTROL) & 0x8000) ? 2u : 0u) | ((GetKeyState(VK_SHIFT) & 0x8000) ? 4u : 0u);
+        unsigned modifiers = ((GetAsyncKeyState(VK_MENU) & 0x8000) ? 1u : 0u)
+            | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? 2u : 0u) | ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? 4u : 0u);
         auto encoded = static_cast<std::uint32_t>(command) | (modifiers << 8)
             | (static_cast<std::uint32_t>(static_cast<std::uint16_t>(delta)) << 16);
         PostMessageW(owner, taskbar::inputMessage, reinterpret_cast<WPARAM>(window), static_cast<LPARAM>(encoded));
@@ -158,6 +158,9 @@ struct Host {
         bool redraw = !hasView || previousScale != scale || previous.width != view.width || previous.height != view.height
             || std::memcmp(&previous.state, &view.state, sizeof(View) - offsetof(View, state)) != 0;
         if (redraw) {
+            wchar_t caption[160]{};
+            _snwprintf_s(caption, _TRUNCATE, L"%s · %s", view.time, view.action);
+            SetWindowTextW(window, caption);
             if (!renderer.draw(view, scale)) return false;
             POINT source{0, 0}; SIZE size{view.width, view.height};
             BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};

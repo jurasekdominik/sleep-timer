@@ -24,7 +24,7 @@ jobs:
         run: ./scripts/build-native.ps1
       - shell: pwsh
         env:
-          PERFORMANCE_BASELINE: ${{ inputs.baseline_ref || github.event.pull_request.base.sha }}
+          PERFORMANCE_BASELINE: ${{ inputs.baseline_ref }}
         run: ./scripts/check-performance.ps1 -BaselineRef $env:PERFORMANCE_BASELINE
       - uses: actions/upload-artifact@v4
         if: always()

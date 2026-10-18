@@ -4,6 +4,11 @@ rem Building needs the .NET SDK: winget install Microsoft.DotNet.SDK.8
 setlocal
 cd /d "%~dp0"
 
+if /I "%~1"=="--native" (
+  powershell -NoProfile -File scripts\build-native.ps1
+  if errorlevel 1 goto :failed
+)
+
 dotnet build SleepTimer.csproj -c Release -o bin\Release
 if errorlevel 1 goto :failed
 
