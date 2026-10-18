@@ -21,6 +21,7 @@ Get portable `SleepTimer.exe` from [Releases](https://github.com/jurasekdominik/
 - Global keybinds for Start / Cancel and the last quick timer.
 - Separate timer and UI fonts, with font weight selection.
 - Timer status in the title bar and progress in the taskbar icon.
+- Optional mini timer beside the hidden-icons arrow on the taskbar.
 
 ## Use
 
@@ -36,6 +37,8 @@ Choose an action, set a duration or a clock time, and click the circle to start.
 </table>
 
 Keep awake prevents automatic sleep, with an option to keep the screen on. Right-click the tray icon for quick timers and keep-awake options. Add your own timer presets in Settings using whole minutes (`90`) or hours (`2h`).
+
+Enable the mini timer in Settings → General → Taskbar timer. Click it to start, pause or resume; double-click to open the app, right-click to cancel, middle-click for the menu, and scroll to adjust. It hides with the taskbar, behind fullscreen or Windows overlays such as Start and screen clipping, or when there is no room.
 
 Closing the window hides it to the tray. Double-click the tray icon to reopen it, or choose Quit from its menu.
 

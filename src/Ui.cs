@@ -300,6 +300,8 @@ namespace SleepTimer
         readonly WheelInput input = new WheelInput();
         readonly Stopwatch edit = new Stopwatch();
         double target = 1800;
+        double countdownEnd;
+        bool counting;
         bool hot;
         DrawingGroup dialArtwork;
         Point artworkCenter;
@@ -342,12 +344,12 @@ namespace SleepTimer
         public bool ContainsDial(Point p) => InRing(p);
         public void Scroll(int wheelDelta, ModifierKeys keys)
         {
-                if (!Interactive) return;
-                int minutes = (keys & (ModifierKeys.Control | ModifierKeys.Shift)) == (ModifierKeys.Control | ModifierKeys.Shift) ? 60
-                    : (keys & ModifierKeys.Control) != 0 ? 30 : (keys & ModifierKeys.Shift) != 0 ? 15
-                    : (keys & ModifierKeys.Alt) != 0 ? 1 : 5;
-                int delta = input.Add(wheelDelta, minutes * 60);
-                if (delta != 0) Wheel?.Invoke(delta);
+            if (!Interactive) return;
+            int minutes = (keys & (ModifierKeys.Control | ModifierKeys.Shift)) == (ModifierKeys.Control | ModifierKeys.Shift) ? 60
+                : (keys & ModifierKeys.Control) != 0 ? 30 : (keys & ModifierKeys.Shift) != 0 ? 15
+                : (keys & ModifierKeys.Alt) != 0 ? 1 : 5;
+            int delta = input.Add(wheelDelta, minutes * 60);
+            if (delta != 0) Wheel?.Invoke(delta);
         }
 
         bool InRing(Point p) => Interactive && Math.Pow(p.X - ActualWidth / 2, 2) + Math.Pow(p.Y - ActualHeight / 2, 2) <= 158 * 158;
@@ -356,48 +358,67 @@ namespace SleepTimer
         {
             seconds = Math.Max(0, Math.Min(Countdown.MaxSet, seconds));
             int circle = AnimationTiming.Normalize(CircleMilliseconds), counter = AnimationTiming.Normalize(CounterMilliseconds);
-            if (animate && IsVisible)
+            if (running && IsVisible && seconds > 0)
             {
+                double end = Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency + seconds;
+                // Status refreshes leave the same clocks running. Edits and clock corrections re-anchor them.
+                if (animate || !counting || Math.Abs(end - countdownEnd) > .1)
+                {
+                    edit.Reset(); counting = true; countdownEnd = end;
+                    AnimateCountdown(PositionProperty, seconds, animate ? circle : 0);
+                    AnimateCountdown(CounterPositionProperty, seconds, animate ? counter : 0);
+                }
+            }
+            else if (animate && IsVisible)
+            {
+                counting = false;
                 edit.Restart();
-                Animate(PositionProperty, seconds, circle, true, running);
-                Animate(CounterPositionProperty, seconds, counter, true, running);
+                Animate(PositionProperty, seconds, circle);
+                Animate(CounterPositionProperty, seconds, counter);
             }
             else
             {
+                bool wasCounting = counting;
+                counting = false;
+                if (wasCounting) edit.Reset();
                 bool holdingCircle = IsVisible && edit.IsRunning && edit.ElapsedMilliseconds < circle;
                 bool holdingCounter = IsVisible && edit.IsRunning && edit.ElapsedMilliseconds < counter;
                 // Each animation has its own clock duration; status refreshes must not interrupt either.
-                if (!holdingCircle)
-                {
-                    if (running && IsVisible) Animate(PositionProperty, seconds, 100, false, true);
-                    else if (seconds != target || !IsVisible) SetPosition(PositionProperty, seconds);
-                }
-                if (!holdingCounter)
-                {
-                    if (running && IsVisible) Animate(CounterPositionProperty, seconds, 100, false, true);
-                    else if (seconds != target || !IsVisible || edit.IsRunning) SetPosition(CounterPositionProperty, seconds);
-                }
+                if (!holdingCircle && (wasCounting || seconds != target || !IsVisible)) SetPosition(PositionProperty, seconds);
+                if (!holdingCounter && (wasCounting || seconds != target || !IsVisible || edit.IsRunning)) SetPosition(CounterPositionProperty, seconds);
                 if (!holdingCircle && !holdingCounter) edit.Reset();
             }
             target = seconds;
             InvalidateVisual();
         }
 
-        void Animate(DependencyProperty property, double seconds, int milliseconds, bool eased, bool running = false)
+        void Animate(DependencyProperty property, double seconds, int milliseconds)
         {
             if (milliseconds == 0) { SetPosition(property, seconds); return; }
             double from = (double)GetValue(property);
-            var motion = new DoubleAnimation(from, seconds, TimeSpan.FromMilliseconds(milliseconds));
-            if (eased) motion.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var motion = new DoubleAnimation(from, seconds, TimeSpan.FromMilliseconds(milliseconds))
+            { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
             BeginAnimation(property, motion, HandoffBehavior.SnapshotAndReplace);
-            if (running)
+        }
+        void AnimateCountdown(DependencyProperty property, double seconds, int editMilliseconds)
+        {
+            double from = (double)GetValue(property);
+            // WPF can retain a replaced clock's snapshot until its first tick. Seed the new
+            // deadline now so instant edits and clock corrections never expose the old value.
+            SetPosition(property, seconds);
+            var countdown = new DoubleAnimation(seconds, 0, TimeSpan.FromSeconds(seconds));
+            // One revolution per hour moves only 0.025 pixels per frame at 10 Hz.
+            // Scroll/edit easing retains the full display frame rate, independently of steady ticking.
+            Timeline.SetDesiredFrameRate(countdown, 10);
+            BeginAnimation(property, countdown, HandoffBehavior.SnapshotAndReplace);
+            if (editMilliseconds > 0)
             {
-                // Keep the real countdown moving beneath the edit easing, through the final frame.
-                var elapsed = new DoubleAnimation(0, -milliseconds / 1000d, TimeSpan.FromMilliseconds(milliseconds))
+                var offset = new DoubleAnimation(from - seconds, 0, TimeSpan.FromMilliseconds(editMilliseconds))
                 {
-                    IsAdditive = true
+                    IsAdditive = true, FillBehavior = FillBehavior.Stop,
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
                 };
-                ApplyAnimationClock(property, elapsed.CreateClock(), HandoffBehavior.Compose);
+                ApplyAnimationClock(property, offset.CreateClock(), HandoffBehavior.Compose);
             }
         }
         void SetPosition(DependencyProperty property, double seconds)
@@ -406,7 +427,7 @@ namespace SleepTimer
         }
         public void Snap(double seconds)
         {
-            edit.Reset(); target = seconds;
+            counting = false; edit.Reset(); target = seconds;
             SetPosition(PositionProperty, seconds); SetPosition(CounterPositionProperty, seconds);
             InvalidateVisual();
         }
@@ -549,6 +570,7 @@ namespace SleepTimer
         string rowSignature;
         Point? screenAnchor;
         HwndSource pinnedSource;
+        bool activateOnOpen;
         IntPtr PinPosition(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (message == 0x0046 && screenAnchor.HasValue)
@@ -588,6 +610,8 @@ namespace SleepTimer
                             new Native.ScreenPoint { X = (int)screenAnchor.Value.X, Y = (int)screenAnchor.Value.Y });
                     }
                 }
+                if (activateOnOpen && PresentationSource.FromVisual(border) is HwndSource menuSource)
+                    Native.SetForegroundWindow(menuSource.Handle);
                 border.Focus();
             };
             border.PreviewKeyDown += (s, e) =>
@@ -660,8 +684,9 @@ namespace SleepTimer
             }
             scroll.ScrollToVerticalOffset(scrollOffset);
         }
-        public void Show(IEnumerable<MenuRow> rows, UIElement anchor = null, bool above = false, Point? screenPosition = null, bool alignRight = false)
+        public void Show(IEnumerable<MenuRow> rows, UIElement anchor = null, bool above = false, Point? screenPosition = null, bool alignRight = false, bool activate = false)
         {
+            activateOnOpen = activate;
             var entries = rows.ToArray();
             bool overlay = anchor != null && entries.Length > 0 && entries[0].Header;
             SetRows(entries);

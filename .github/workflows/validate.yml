@@ -2,7 +2,7 @@ name: Validate
 on:
   push:
     branches: [main, WPF]
-    tags: [v1.1]
+    tags: [v1.2]
     paths-ignore: ['assets/screenshot*.png', 'README.md']
   pull_request:
   workflow_dispatch:
@@ -54,11 +54,11 @@ jobs:
           path: |
             bin/Release/net48/SleepTimer.exe
             validation-output/
-      - name: Publish 1.1 release
-        if: github.event_name == 'push' && github.ref == 'refs/tags/v1.1'
+      - name: Publish 1.2 release
+        if: github.event_name == 'push' && github.ref == 'refs/tags/v1.2'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release create v1.1 bin/Release/net48/SleepTimer.exe --repo '${{ github.repository }}' --verify-tag --title 'Sleep Timer 1.1' --notes-file CHANGELOG.md
+          gh release create v1.2 bin/Release/net48/SleepTimer.exe --repo '${{ github.repository }}' --verify-tag --title 'Sleep Timer 1.2' --notes-file CHANGELOG.md
           if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
