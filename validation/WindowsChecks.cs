@@ -410,9 +410,7 @@ namespace SleepTimer
                     Settings.Set("validation_bool", 0); Check(!Settings.Get("validation_bool", true), "DWORD false setting was ignored");
                     var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                     Theme.Init(app);
-                    var reportedMethod = typeof(Window).Module.ResolveMethod(0x06000db3);
-                    Console.WriteLine("WPF runtime: " + FileVersionInfo.GetVersionInfo(typeof(Window).Assembly.Location).FileVersion
-                        + "; reported method 0xdb3: " + reportedMethod.DeclaringType.FullName + "." + reportedMethod);
+                    Console.WriteLine("WPF runtime: " + FileVersionInfo.GetVersionInfo(typeof(Window).Assembly.Location).FileVersion);
                     string crashDirectory = Path.Combine(Path.GetTempPath(), "SleepTimer-crash-check-" + Guid.NewGuid().ToString("N"));
                     try
                     {

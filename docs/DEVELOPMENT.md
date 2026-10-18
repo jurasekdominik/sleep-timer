@@ -27,4 +27,6 @@ The mini timer has a transparent background and follows the native window immedi
 
 The widget uses alpha 1 on its hit surface so blank padding remains clickable. Its small transparent window uses software rendering during screen-capture and display transitions. It follows the taskbar layer and may hide while Start, Search or screen clipping covers it. Foreground events are coalesced and ignored during disposal. At-time schedules retain an absolute deadline across pause/resume; resuming a missed deadline uses the next future occurrence of the selected clock time. Duration-mode pauses still freeze the remaining duration. At-time scrolling updates both the absolute deadline and the selected clock field. Idle at-time widgets show the clock target and Ready, rather than a live countdown.
 
+Widget callbacks stop before closing begins. Close-to-tray hides the main window after cancelling its Closing event; quit confirmation runs before Close. WPF rejects Show/Hide calls while a window is closing.
+
 Unhandled managed exceptions are recorded in `%LOCALAPPDATA%\SleepTimer\last-crash.log`. The file contains the latest exception and app/runtime versions; logging does not suppress the exception or send data anywhere. For capture-related failures, also check Windows Reliability History: native failures may not reach the managed handlers.
