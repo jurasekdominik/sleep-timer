@@ -24,6 +24,16 @@ namespace SleepTimer
         readonly DispatcherTimer leftClick = new DispatcherTimer(DispatcherPriority.Input);
         readonly Func<int, int, PixelRectangle?> locate;
         readonly Func<PixelRectangle, bool> canShow;
+        readonly Func<PixelRectangle, bool> canEmbed;
+        readonly bool preferNative;
+        readonly IntPtr parentOverride;
+        readonly Action toggle, cancel, menu, open;
+        readonly Action<int, ModifierKeys> scroll;
+        NativeTaskbarHost native;
+        bool nativeAttempted, nativeFailed;
+        IntPtr nativeParent;
+        uint nativeParentProcess;
+        public string RendererDescription => native?.Ready == true ? "Native" : preferNative ? "WPF fallback" : "WPF";
         readonly Stopwatch probeAge = new Stopwatch();
         readonly Stopwatch settleAge = new Stopwatch();
         Task<PixelRectangle?> probe;
@@ -55,10 +65,14 @@ namespace SleepTimer
 
         public TaskbarTimer(Action toggle, Action cancel, Action menu, Action<int, ModifierKeys> scroll,
             Func<int, int, PixelRectangle?> locate = null,
-            Func<PixelRectangle, bool> canShow = null, Action open = null)
+            Func<PixelRectangle, bool> canShow = null, Action open = null,
+            bool preferNative = false, IntPtr nativeParent = default)
         {
             this.locate = locate ?? TaskbarLocator.Locate;
             this.canShow = canShow ?? TaskbarLocator.CanShow;
+            canEmbed = nativeParent != IntPtr.Zero ? canShow ?? (bounds => true) : TaskbarLocator.CanEmbed;
+            this.preferNative = preferNative; parentOverride = nativeParent;
+            this.toggle = toggle; this.cancel = cancel; this.menu = menu; this.open = open; this.scroll = scroll;
             Title = "Sleep Timer · taskbar timer"; Width = 140; Height = 34;
             WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize;
             ShowInTaskbar = ShowActivated = false; AllowsTransparency = true; Background = Brushes.Transparent;
@@ -115,6 +129,8 @@ namespace SleepTimer
             };
             foregroundChanged = (hook, message, window, objectId, childId, thread, stamp) =>
             {
+                // Native children follow parent layering without foreground scans or window-order repairs.
+                if (message == 3 && native?.Ready == true) return;
                 if (message == 3 || TaskbarLocator.IsTaskbarWindow(window)) QueueForegroundRefresh();
             };
             // Follow both taskbar activation and games becoming foreground, without taking focus.
@@ -136,6 +152,11 @@ namespace SleepTimer
         {
             uint process = TaskbarLocator.ExplorerProcess();
             if (process == explorerProcess && (process == 0 || taskbarHook != IntPtr.Zero)) return;
+            if (parentOverride == IntPtr.Zero && process != explorerProcess)
+            {
+                native?.Dispose(); native = null;
+                nativeAttempted = nativeFailed = false;
+            }
             if (taskbarHook != IntPtr.Zero) UnhookWinEvent(taskbarHook);
             explorerProcess = process;
             // Filter in Windows so activity in other applications does not wake this widget.
@@ -160,6 +181,7 @@ namespace SleepTimer
 
         IntPtr WindowMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            if (native?.HandleMessage(message, wParam, lParam) == true) { handled = true; return IntPtr.Zero; }
             if (message == 0x0021) { handled = true; return (IntPtr)3; } // MA_NOACTIVATE
             if (message == TaskbarCreated || message == 0x007E || message == 0x031E) QueueForegroundRefresh();
             return IntPtr.Zero;
@@ -175,23 +197,23 @@ namespace SleepTimer
                 {
                     // Never accumulate stuck accessibility calls, or keep stale coordinates visible.
                     if (probeAge.ElapsedMilliseconds > 1500)
-                    { Hide(); previous = pending = null; waitingForLayout = true; placement.Interval = TimeSpan.FromSeconds(30); }
+                    { previous = pending = null; waitingForLayout = true; HideSurfaces(); placement.Interval = TimeSpan.FromSeconds(30); }
                     return;
                 }
                 var bounds = probe.Status == TaskStatus.RanToCompletion ? probe.Result : null;
                 if (probe.IsFaulted) { var ignored = probe.Exception; }
                 probe = null;
                 layoutDirty = false;
-                if (!bounds.HasValue) { Hide(); previous = pending = null; waitingForLayout = true; }
-                else if (!canShow(bounds.Value))
+                if (!bounds.HasValue) { previous = pending = null; waitingForLayout = true; HideSurfaces(); }
+                else if (!CanPresent(bounds.Value))
                 {
-                    Hide(); previous = bounds; pending = null; waitingForLayout = true;
+                    previous = bounds; pending = null; waitingForLayout = true; HideSurfaces();
                 }
                 else if (waitingForLayout || previous != bounds)
                 {
                     if (pending != bounds)
                     {
-                        Hide(); waitingForLayout = true; pending = bounds; settleAge.Restart();
+                        waitingForLayout = true; pending = bounds; HideSurfaces(); settleAge.Restart();
                     }
                     else if (settleAge.ElapsedMilliseconds >= 300)
                     {
@@ -214,8 +236,18 @@ namespace SleepTimer
         {
             var candidate = pending ?? previous;
             if (disposed || !candidate.HasValue) return;
-            if (!canShow(candidate.Value)) { Hide(); waitingForLayout = true; pending = null; return; }
+            if (!CanPresent(candidate.Value)) { waitingForLayout = true; pending = null; HideSurfaces(); return; }
             if (waitingForLayout) return;
+            EnsureNative();
+            // Do not warm up WPF's widget renderer for a healthy native launch.
+            // Startup is bounded; failures return here and show the compatibility surface.
+            if (native?.Starting == true) { if (IsVisible) Hide(); return; }
+            if (native?.Ready == true)
+            {
+                if (IsVisible) Hide();
+                if (SyncNative(canEmbed(candidate.Value))) return;
+            }
+            if (!canShow(candidate.Value)) { if (IsVisible) Hide(); return; }
             if (!IsVisible)
             {
                 Show();
@@ -223,6 +255,45 @@ namespace SleepTimer
                 SetWindowPos(source.Handle, IntPtr.Zero, at.X, at.Y, at.Width, at.Height, 0x0214);
             }
             FollowTaskbarLayer(FindWindow("Shell_TrayWnd", null));
+        }
+
+        bool CanPresent(PixelRectangle bounds) => (preferNative && !nativeFailed && canEmbed(bounds)) || canShow(bounds);
+        void EnsureNative()
+        {
+            if (!preferNative || disposed) return;
+            var parent = parentOverride != IntPtr.Zero ? parentOverride : FindWindow("Shell_TrayWnd", null);
+            NativeTaskbarHost.ParentProcess(parent, out uint process);
+            if (parent == IntPtr.Zero || (nativeAttempted && nativeParent == parent && nativeParentProcess == process)) return;
+            native?.Dispose(); nativeParent = parent; nativeParentProcess = process;
+            nativeAttempted = true; nativeFailed = false;
+            NativeTaskbarHost created = null;
+            created = new NativeTaskbarHost(source.Handle, parent, () =>
+            {
+                // A previous helper can finish exiting after Explorer or the renderer is replaced.
+                if (disposed || native != created) return;
+                nativeFailed = created.Failure != null;
+                RefreshTaskbarLayer();
+            }, toggle, cancel, menu, open, scroll);
+            native = created;
+            if (!native.Start()) { nativeFailed = true; native.Dispose(); }
+        }
+        bool SyncNative(bool visible)
+        {
+            if (native?.Ready != true) return false;
+            var at = previous ?? new PixelRectangle(0, 0, 140, 34);
+            var view = new NativeTaskbarHost.View {
+                X = at.X, Y = at.Y, Width = at.Width, Height = at.Height, Visible = visible ? 1u : 0u,
+                State = (uint)ring.State, Time = time.Text, Action = action.Text,
+                Progress = (uint)Math.Round(Math.Max(0, Math.Min(1, ring.Fraction)) * 1000000),
+                Accent = Rgb(Theme.TimerColor(ring.Tone)), Text = Rgb(Theme.Text), Secondary = Rgb(Theme.Second), Track = Rgb(Theme.Border)
+            };
+            return native.Update(view);
+        }
+        static uint Rgb(Color color) => (uint)(color.R << 16 | color.G << 8 | color.B);
+        void HideSurfaces()
+        {
+            if (IsVisible) Hide();
+            SyncNative(false);
         }
 
         void FollowTaskbarLayer(IntPtr taskbar)
@@ -244,12 +315,14 @@ namespace SleepTimer
             button.ToolTip = value + " · " + actionLabel + " · " + (state == TimerState.Idle ? "Ready" : state.ToString())
                 + "\nClick to start or pause · Double-click to open · Right-click to cancel · Scroll to adjust · Middle-click for menu";
             ring.Fraction = fraction; ring.State = state; ring.Tone = tone; ring.InvalidateVisual();
+            if (native?.Ready == true) SyncNative(!waitingForLayout && previous.HasValue && canEmbed(previous.Value));
         }
 
         void Stop()
         {
             if (disposed) return;
             disposed = true; leftClick.Stop(); placement.Stop(); source?.RemoveHook(WindowMessage);
+            native?.Dispose(); native = null;
             if (foregroundHook != IntPtr.Zero) { UnhookWinEvent(foregroundHook); foregroundHook = IntPtr.Zero; }
             if (taskbarHook != IntPtr.Zero) { UnhookWinEvent(taskbarHook); taskbarHook = IntPtr.Zero; }
         }

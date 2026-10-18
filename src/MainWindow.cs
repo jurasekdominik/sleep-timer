@@ -26,6 +26,7 @@ namespace SleepTimer
         readonly Forms.NotifyIcon tray = new Forms.NotifyIcon();
         readonly DispatcherTimer ticker = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(100) };
         readonly DispatcherTimer durationSave = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        readonly DispatcherTimer shellRefresh = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(100) };
         DispatcherTimer aborted;
         readonly TimerFace face = new TimerFace();
         readonly Canvas main = new Canvas(), settings = new Canvas();
@@ -41,6 +42,8 @@ namespace SleepTimer
         readonly ToggleButton startupSwitch = new ToggleButton { IsChecked = Settings.Get("start_with_windows", false) };
         readonly ToggleButton forceSwitch = new ToggleButton { IsChecked = Settings.Get("force", true) };
         readonly ToggleButton taskbarSwitch = new ToggleButton { IsChecked = Settings.Get("taskbar_timer", false) };
+        readonly Button taskbarRenderer = new Button { FontSize = 12, FontWeight = FontWeights.SemiBold,
+            HorizontalContentAlignment = HorizontalAlignment.Left };
         readonly TextBox accentField = new TextBox { MaxLength = 7, Width = 96, FontSize = 13, Padding = new Thickness(0), TextAlignment = TextAlignment.Center };
         readonly TextBox circleDuration = new TextBox { MaxLength = 5, TextAlignment = TextAlignment.Right };
         readonly TextBox counterDuration = new TextBox { MaxLength = 5, TextAlignment = TextAlignment.Right };
@@ -53,7 +56,7 @@ namespace SleepTimer
         readonly StackPanel customRows = new StackPanel();
         readonly ScrollViewer customScroll = new ThemedScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Border quickCard;
-        readonly PopupMenu trayMenu = new PopupMenu(), awakeMenu = new PopupMenu(160);
+        readonly PopupMenu trayMenu = new PopupMenu(), awakeMenu = new PopupMenu(160), rendererMenu = new PopupMenu(220);
         readonly List<FrameworkElement> cards = new List<FrameworkElement>();
         readonly List<Button> tabButtons = new List<Button>();
         readonly List<Button> swatches = new List<Button>();
@@ -149,6 +152,7 @@ namespace SleepTimer
             tray.BalloonTipClicked += (s, e) => Dispatcher.BeginInvoke((Action)ShowWindow);
             ticker.Tick += (s, e) => Tick();
             durationSave.Tick += (s, e) => SaveDuration();
+            shellRefresh.Tick += (s, e) => { shellRefresh.Stop(); RefreshShell(); };
             SourceInitialized += (s, e) =>
             {
                 source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
@@ -277,7 +281,20 @@ namespace SleepTimer
             var general = (Canvas)Card(0, 88, 184).Child;
             SwitchRow(general, "Start with Windows", "Opens in the tray when you sign in", startupSwitch, 0);
             SwitchRow(general, "Force close apps", "Skips “save changes?” prompts (/f)", forceSwitch, 60);
-            SwitchRow(general, "Taskbar timer", "Beside the hidden-icons arrow", taskbarSwitch, 120);
+            taskbarRenderer.Style = (Style)FindResource("TextButton");
+            taskbarRenderer.Content = Settings.Get("native_taskbar", true) ? "Native ▾" : "Compatible (WPF) ▾";
+            taskbarRenderer.ToolTip = "Choose taskbar rendering. Native attaches to the taskbar; WPF provides a compatibility fallback.";
+            taskbarRenderer.Click += (s, e) =>
+            {
+                if (rendererMenu.Visible || rendererMenu.JustClosed) return;
+                bool selected = Settings.Get("native_taskbar", true);
+                rendererMenu.Show(new[] {
+                    new MenuRow { Text = taskbarTimer == null ? "Rendering" : "Rendering: " + taskbarTimer.RendererDescription, Header = true },
+                    new MenuRow { Text = "Native", Selected = selected, Click = () => SetTaskbarRenderer(true) },
+                    new MenuRow { Text = "Compatible (WPF)", Selected = !selected, Click = () => SetTaskbarRenderer(false) }
+                }, taskbarRenderer);
+            };
+            SwitchRow(general, "Taskbar timer", "", taskbarSwitch, 120, taskbarRenderer);
             taskbarSwitch.Click += (s, e) => SetTaskbarTimer(taskbarSwitch.IsChecked == true);
             startupSwitch.Click += (s, e) => { bool on = startupSwitch.IsChecked == true; Startup.Set(on); Settings.Set("start_with_windows", on); };
             forceSwitch.Click += (s, e) => Settings.Set("force", forceSwitch.IsChecked == true);
@@ -511,9 +528,10 @@ namespace SleepTimer
             animationNote.SetResourceReference(TextBlock.ForegroundProperty, "FaintBrush");
         }
 
-        static void SwitchRow(Canvas parent, string title, string note, ToggleButton toggle, double y)
+        static void SwitchRow(Canvas parent, string title, string note, ToggleButton toggle, double y, Button noteButton = null)
         {
-            TextBlock label = Label(title), detail = Label(note, 12, true);
+            TextBlock label = Label(title);
+            FrameworkElement detail = noteButton ?? (FrameworkElement)Label(note, 12, true);
             Place(parent, label, 20, y + 12, 230, 20);
             Place(parent, detail, 20, y + 34, 230, 18);
             Place(parent, toggle, 256, y + 20);
@@ -524,7 +542,8 @@ namespace SleepTimer
                 toggle.IsChecked = toggle.IsChecked != true;
                 toggle.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
             };
-            label.MouseLeftButtonUp += click; detail.MouseLeftButtonUp += click;
+            label.MouseLeftButtonUp += click;
+            if (noteButton == null) detail.MouseLeftButtonUp += click;
         }
 
         void LayoutTabs()
@@ -621,8 +640,15 @@ namespace SleepTimer
                 {
                     Native.GetPhysicalCursorPos(out var point);
                     trayClick = new Point(point.X, point.Y); ShowTrayMenu();
-                }, face.Scroll, open: ShowWindow);
+                }, face.Scroll, open: ShowWindow, preferNative: Settings.Get("native_taskbar", true));
             UpdateView();
+        }
+        void SetTaskbarRenderer(bool native)
+        {
+            Settings.Set("native_taskbar", native);
+            taskbarRenderer.Content = native ? "Native ▾" : "Compatible (WPF) ▾";
+            taskbarTimer?.Dispose(); taskbarTimer = null;
+            if (taskbarSwitch.IsChecked == true) SetTaskbarTimer(true);
         }
         void ApplyFontWeight(int weight, bool ui)
         {
@@ -962,19 +988,14 @@ namespace SleepTimer
                 face.Title = state == TimerState.Running ? action.RunTitle : "PAUSED"; face.Time = TimeText.Clock(seconds);
                 face.Sub = state == TimerState.Running ? action.At + " " + DateTimeOffset.Now.AddSeconds(seconds).ToLocalTime().ToString("HH:mm") : "Resume to continue";
             }
-            // Windows controls thumbnail width. Keep the header short enough to
-            // show the full time; expose action and state in the shell tooltip.
-            string status = idle ? "Ready" : state == TimerState.Running ? "Running" : "Paused";
-            Title = IsVisible ? face.Time + " · " + status : face.Time;
-            TaskbarItemInfo.Description = face.Time + " · " + action.Label + " · "
-                + status;
             face.Tone = TimerStatus.Tone(state, seconds); face.UpdatePosition(seconds, animate, state == TimerState.Running);
-            string miniTime = clockMode ? "At " + (countdown.TargetTime.HasValue
-                ? TimeZoneInfo.ConvertTime(countdown.TargetTime.Value, TimeZoneInfo.Local).ToString("HH:mm")
-                : TimeText.HourMinute(clockMinute)) : TimeText.Clock(seconds);
-            taskbarTimer?.Update(miniTime, action.Label, state, idle ? 1 : countdown.Fraction, face.Tone);
-            // Tray IPC, menus and unrelated controls refresh on the regular status tick.
-            if (dialOnly) return;
+            // Keep dial easing at display speed; shell text and cross-process drawing need at most 10 Hz.
+            if (dialOnly)
+            {
+                if (!shellRefresh.IsEnabled) shellRefresh.Start();
+                return;
+            }
+            shellRefresh.Stop(); RefreshShell();
             picker.SetCurrent(action.Key); picker.IsEnabled = mode.IsEnabled = idle;
             forceSwitch.IsEnabled = action.Key != "sleep";
             string awake = awakeMinutes < 0 ? "on" : awakeMinutes > 0 ? TimeText.Clock(awakeEnd - clock.Elapsed.TotalSeconds) : null;
@@ -990,6 +1011,25 @@ namespace SleepTimer
             if (awake != null) tip += "\nKeep awake: " + awake;
             tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
             UpdateIcon(idle ? 1 : countdown.Fraction, state, face.Tone);
+        }
+
+        void RefreshShell()
+        {
+            if (disposed || executing) return;
+            var state = countdown.State;
+            bool idle = state == TimerState.Idle;
+            double seconds = idle ? countdown.Duration : countdown.Remaining;
+            string time = idle && clockMode ? TimeText.HourMinute(clockMinute) : TimeText.Clock(seconds);
+            string status = idle ? "Ready" : state == TimerState.Running ? "Running" : "Paused";
+            // Windows controls thumbnail width. Keep the title short and put details in its tooltip.
+            string title = IsVisible ? time + " · " + status : time;
+            if (Title != title) Title = title;
+            string description = time + " · " + action.Label + " · " + status;
+            if (TaskbarItemInfo.Description != description) TaskbarItemInfo.Description = description;
+            string miniTime = clockMode ? "At " + (countdown.TargetTime.HasValue
+                ? TimeZoneInfo.ConvertTime(countdown.TargetTime.Value, TimeZoneInfo.Local).ToString("HH:mm")
+                : TimeText.HourMinute(clockMinute)) : time;
+            taskbarTimer?.Update(miniTime, action.Label, state, idle ? 1 : countdown.Fraction, TimerStatus.Tone(state, seconds));
         }
 
         void UpdateIcon(double fraction, TimerState state, TimerTone tone)
@@ -1109,12 +1149,12 @@ namespace SleepTimer
         {
             if (disposed) return;
             SaveDuration(); disposed = true;
-            ticker.Stop(); durationSave.Stop(); aborted?.Stop();
+            ticker.Stop(); durationSave.Stop(); shellRefresh.Stop(); aborted?.Stop();
             CompositionTarget.Rendering -= RenderWheelView; wheelViewPending = false;
             UnregisterShortcuts();
             source?.RemoveHook(WindowMessage);
             face.Snap(0);
-            trayMenu.Dispose(); awakeMenu.Dispose(); colorPicker?.Close(); fontGallery?.Close();
+            trayMenu.Dispose(); awakeMenu.Dispose(); rendererMenu.Dispose(); colorPicker?.Close(); fontGallery?.Close();
             taskbarTimer?.Dispose(); taskbarTimer = null;
             tray.Visible = false; tray.Icon?.Dispose(); tray.Dispose();
             if (trayHandle != IntPtr.Zero) { Native.DestroyIcon(trayHandle); trayHandle = IntPtr.Zero; }

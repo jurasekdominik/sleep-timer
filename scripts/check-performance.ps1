@@ -21,11 +21,13 @@ try {
         $baselineOutput = Join-Path $baseline 'bin'
         dotnet build validation/PerformanceChecks.csproj -c Release --nologo -warnaserror "-p:SleepTimerSourceRoot=$baselineSource" --output $baselineOutput
         if ($LASTEXITCODE -ne 0) { throw 'Baseline performance build failed' }
-        Invoke-Measurement (Join-Path $baselineOutput 'PerformanceChecks.exe') @('--baseline', 'validation-output/performance-baseline.csv') 240000
+        Invoke-Measurement (Join-Path $baselineOutput 'PerformanceChecks.exe') @('--baseline', '--adjustments-only', 'validation-output/performance-baseline.csv') 120000
+        Invoke-Measurement (Join-Path $baselineOutput 'PerformanceChecks.exe') @('--baseline', '--native', '--adjustments-only', 'validation-output/performance-baseline-native.csv') 120000
     }
     dotnet build validation/PerformanceChecks.csproj -c Release --nologo -warnaserror
     if ($LASTEXITCODE -ne 0) { throw 'Performance build failed' }
-    Invoke-Measurement ./validation/bin/Release/net48/PerformanceChecks.exe @('validation-output/performance.csv') 240000
+    Invoke-Measurement ./validation/bin/Release/net48/PerformanceChecks.exe @('validation-output/performance.csv') 300000
+    Invoke-Measurement ./validation/bin/Release/net48/PerformanceChecks.exe @('--native', 'validation-output/performance-native.csv') 300000
 } finally {
     if ($baseline -and (Test-Path $baseline)) { Remove-Item $baseline -Recurse -Force }
     Pop-Location

@@ -6,7 +6,7 @@
  </PropertyGroup>
  <ItemGroup>
   <Reference Include="UIAutomationClient"/><Reference Include="UIAutomationTypes"/>
-  <Compile Include="../src/*.cs"/><Compile Include="WindowsChecks.cs"/>
+  <Compile Include="../src/*.cs"/><Compile Include="WindowsChecks.cs"/><Compile Include="NativeChecks.cs"/>
   <Resource Include="../assets/SleepTimer.ico" Link="assets/SleepTimer.ico"/>
  </ItemGroup>
 </Project>

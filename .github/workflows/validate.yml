@@ -2,7 +2,7 @@ name: Validate
 on:
   push:
     branches: [main, WPF]
-    tags: [v1.2]
+    tags: [v1.3]
     paths-ignore: ['assets/screenshot*.png', 'README.md']
   pull_request:
   workflow_dispatch:
@@ -30,9 +30,13 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
+      - shell: pwsh
+        run: ./scripts/build-native.ps1
       - run: dotnet build SleepTimer.csproj -c Release --nologo -warnaserror
       - shell: pwsh
         run: ./scripts/check-windows.ps1
+        env:
+          SLEEP_TIMER_NATIVE_REQUIRED: '1'
       - name: Measure executable and verify standalone startup
         shell: pwsh
         run: |
@@ -54,11 +58,11 @@ jobs:
           path: |
             bin/Release/net48/SleepTimer.exe
             validation-output/
-      - name: Publish 1.2 release
-        if: github.event_name == 'push' && github.ref == 'refs/tags/v1.2'
+      - name: Publish 1.3 release
+        if: github.event_name == 'push' && github.ref == 'refs/tags/v1.3'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release create v1.2 bin/Release/net48/SleepTimer.exe --repo '${{ github.repository }}' --verify-tag --title 'Sleep Timer 1.2' --notes-file CHANGELOG.md
+          gh release create v1.3 bin/Release/net48/SleepTimer.exe --repo '${{ github.repository }}' --verify-tag --title 'Sleep Timer 1.3' --notes-file CHANGELOG.md
           if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }

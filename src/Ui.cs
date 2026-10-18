@@ -309,6 +309,9 @@ namespace SleepTimer
         bool artworkHot;
         readonly Geometry[] hourSectors = new Geometry[24];
         readonly Drawing[] hourArtwork = new Drawing[24];
+        DrawingGroup completeHours;
+        int completeHourCount = -1;
+        Pen progressPen;
         readonly Dictionary<double, TextArtwork> textArtwork = new Dictionary<double, TextArtwork>();
         sealed class TextArtwork
         {
@@ -449,21 +452,25 @@ namespace SleepTimer
             base.OnRender(g);
             var center = new Point(ActualWidth / 2, ActualHeight / 2);
             g.DrawEllipse(Brushes.Transparent, null, center, 158, 158);
-            const double radius = 140, stroke = 16;
+            const double radius = 140;
             Color color = Theme.TimerColor(Tone);
             if (dialArtwork == null || artworkCenter != center || artworkColor != color || artworkHot != hot)
                 CacheDial(center, color);
             g.DrawDrawing(dialArtwork);
             double shown = TimerDial.ArcFraction(Position);
-            if (shown > .000001) DrawArc(g, center, radius, -90, shown * 360, stroke, color);
-            double hours = Math.Max(0, Position / 3600);
-            for (int i = 0; i < (int)Math.Ceiling(hours); i++)
+            if (shown > .000001) DrawArc(g, center, radius, -90, shown * 360, progressPen);
+            double hours = TimerDial.HourFill(Position);
+            int whole = Math.Min(24, (int)hours);
+            if (completeHourCount != whole)
             {
-                double opacity = Math.Min(1, hours - i);
-                if (opacity >= 1) g.DrawDrawing(hourArtwork[i]);
-                else g.DrawGeometry(Theme.Brush(Theme.Blend(Theme.Bg, color, opacity)),
-                    new Pen(Theme.Brush(Theme.Blend(Theme.Bg, Theme.Blend(Theme.Border, color, .3), opacity)), 1), hourSectors[i]);
+                completeHours = new DrawingGroup();
+                for (int i = 0; i < whole; i++) completeHours.Children.Add(hourArtwork[i]);
+                completeHours.Freeze(); completeHourCount = whole;
             }
+            g.DrawDrawing(completeHours);
+            double opacity = hours - whole;
+            if (whole < 24 && opacity > 0) g.DrawGeometry(Theme.Brush(Theme.Blend(Theme.Bg, color, opacity)),
+                new Pen(Theme.Brush(Theme.Blend(Theme.Bg, Theme.Blend(Theme.Border, color, .3), opacity)), 1), hourSectors[whole]);
             DrawText(g, Title, center.Y - 96, 12, Theme.Second, true);
             DrawText(g, DisplayTime, center.Y - 66, 45.3, Theme.Text, counter: true);
             DrawText(g, Sub, center.Y + 51, 14, Theme.Second);
@@ -471,6 +478,8 @@ namespace SleepTimer
         void CacheDial(Point center, Color color)
         {
             artworkCenter = center; artworkColor = color; artworkHot = hot;
+            completeHourCount = -1;
+            progressPen = new Pen(Theme.Brush(color), 16); progressPen.Freeze();
             var drawing = new DrawingGroup();
             using (var g = drawing.Open())
             {
@@ -513,8 +522,9 @@ namespace SleepTimer
         }
         static Point Polar(Point c, double r, double a) => new Point(c.X + r * Math.Cos(a), c.Y + r * Math.Sin(a));
         public static void DrawArc(DrawingContext g, Point c, double r, double start, double sweep, double width, Color color)
+            => DrawArc(g, c, r, start, sweep, new Pen(Theme.Brush(color), width));
+        static void DrawArc(DrawingContext g, Point c, double r, double start, double sweep, Pen pen)
         {
-            var pen = new Pen(Theme.Brush(color), width) { StartLineCap = PenLineCap.Flat, EndLineCap = PenLineCap.Flat };
             if (sweep >= 359.9999) { g.DrawEllipse(null, pen, c, r, r); return; }
             var path = new StreamGeometry();
             using (var p = path.Open())

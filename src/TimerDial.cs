@@ -13,26 +13,9 @@ namespace SleepTimer
         public static int Complete(double remainingFraction) => (int)Math.Floor(100 * (1 - Math.Max(0, Math.Min(1, remainingFraction))));
     }
 
-    /// <summary>Each revolution represents an hour; inner blocks carry all remaining hours.</summary>
-    sealed class TimerDial
+    static class TimerDial
     {
-        public double Seconds => 3600;
-        public int Ticks => 60;
-        public int MajorEvery => 5;
-        public int ExtraHours { get; }
-        public double HourFill { get; }
-
-        TimerDial(double remaining)
-        {
-            ExtraHours = Math.Max(0, (int)Math.Ceiling(WholeSeconds(remaining) / Seconds) - 1);
-            HourFill = ExtraHours + Fraction(remaining);
-        }
-
-        // Match the numeric countdown's rounding so marks and digits cross hour boundaries together.
-        static double WholeSeconds(double remaining) => Math.Ceiling(Math.Max(0, Math.Min(Countdown.MaxSet, remaining)));
-        public static TimerDial For(double remaining) => new TimerDial(remaining);
-
-        public double Fraction(double remaining) => ArcFraction(remaining);
+        public static double HourFill(double remaining) => Math.Max(0, Math.Min(Countdown.MaxSet, remaining)) / 3600;
 
         /// <summary>Wrap an animated total-second position into the current hourly arc.</summary>
         public static double ArcFraction(double remaining)

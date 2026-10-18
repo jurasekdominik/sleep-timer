@@ -12,7 +12,7 @@ permissions:
 jobs:
   measure:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v5
         with:
@@ -21,8 +21,10 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       - shell: pwsh
+        run: ./scripts/build-native.ps1
+      - shell: pwsh
         env:
-          PERFORMANCE_BASELINE: ${{ inputs.baseline_ref || github.event.pull_request.base.sha }}
+          PERFORMANCE_BASELINE: ${{ inputs.baseline_ref }}
         run: ./scripts/check-performance.ps1 -BaselineRef $env:PERFORMANCE_BASELINE
       - uses: actions/upload-artifact@v4
         if: always()

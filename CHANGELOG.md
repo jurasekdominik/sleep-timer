@@ -1,5 +1,5 @@
-# Sleep Timer 1.2
+# Sleep Timer 1.3
 
-- Added a taskbar timer with click, scroll and double-click controls.
-- Fixed at-time pause/resume.
-- Reduced CPU use and fixed app crashes.
+- Native taskbar timer that stays visible with Start open.
+- Fewer redraws while adjusting the timer.
+- Clearer helper name and icon in Task Manager.
