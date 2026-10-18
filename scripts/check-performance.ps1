@@ -21,7 +21,7 @@ try {
         $baselineOutput = Join-Path $baseline 'bin'
         dotnet build validation/PerformanceChecks.csproj -c Release --nologo -warnaserror "-p:SleepTimerSourceRoot=$baselineSource" --output $baselineOutput
         if ($LASTEXITCODE -ne 0) { throw 'Baseline performance build failed' }
-        Invoke-Measurement (Join-Path $baselineOutput 'PerformanceChecks.exe') @('--baseline', 'validation-output/performance-baseline.csv') 120000
+        Invoke-Measurement (Join-Path $baselineOutput 'PerformanceChecks.exe') @('--baseline', 'validation-output/performance-baseline.csv') 240000
     }
     dotnet build validation/PerformanceChecks.csproj -c Release --nologo -warnaserror
     if ($LASTEXITCODE -ne 0) { throw 'Performance build failed' }

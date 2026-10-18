@@ -19,7 +19,7 @@ bash scripts/check-timers.sh
 
 Windows checks preserve saved settings and suppress power actions. CI also checks standalone startup and uploads the executable and UI previews.
 
-Run `./scripts/check-performance.ps1` on Windows to measure idle/running CPU, working set, private memory and repeated widget/window disposal. Optional `-BaselineRef <commit>` compares idle usage against an earlier taskbar-timer build. Samples run after warm-up using the real app window and dispatcher; CPU is reported both per core and across the machine. Raw CSV data stays in `validation-output` and is uploaded by the manual Performance workflow.
+Run `./scripts/check-performance.ps1` on Windows to measure idle/running CPU, working set, private memory and repeated widget/window disposal. Optional `-BaselineRef <commit>` compares usage against an earlier build. Samples run after warm-up using the real app window and dispatcher; CPU is reported both per core and across the machine. If the desktop has no accessible taskbar slot, the harness measures the real widget at a controlled location and labels those samples separately from native placement. Raw CSV data stays in `validation-output` and is uploaded by the Performance workflow.
 
 Before a release, test real power actions, global keybinds, tray positioning across monitors, and text at different Windows scaling settings.
 
@@ -27,7 +27,7 @@ The optional taskbar timer is a separate non-activating WPF window. Foreground a
 
 The mini timer has a transparent background and follows the native window immediately above Explorer. Widget menus and Quit run after the mouse event releases capture. Single-click waits for Windows' double-click interval; double-click opens the main window without changing timer state. Closing the widget cancels pending clicks.
 
-The hidden idle/paused app stops its status ticker. Running countdowns refresh once a second in the tray and every 100 ms while visible. Visible idle previews refresh at the next minute; finite keep-awake deadlines still expire on time. Wheel edits use a separate one-shot save timer.
+The hidden idle/paused app stops its status ticker. Running status refreshes once a second. The visible dial uses continuous countdown clocks rather than replacing them on each status update. Steady motion renders at 10 Hz (about 0.025 pixels of arc movement per frame); independent circle/text edit easing runs at the normal display frame rate. Hiding or pausing releases those clocks. Visible idle previews refresh at the next minute; finite keep-awake deadlines still expire on time. Wheel edits use a separate one-shot save timer.
 
 The widget uses alpha 1 on its hit surface so blank padding remains clickable. Its small transparent window uses software rendering during screen-capture and display transitions. It follows the taskbar layer and may hide while Start, Search or screen clipping covers it. Foreground events are coalesced and ignored during disposal. At-time schedules retain an absolute deadline across pause/resume; resuming a missed deadline uses the next future occurrence of the selected clock time. Duration-mode pauses still freeze the remaining duration. At-time scrolling updates both the absolute deadline and the selected clock field. Idle at-time widgets show the clock target and Ready, rather than a live countdown.
 

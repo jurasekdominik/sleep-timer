@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using Microsoft.Win32;
 
 namespace SleepTimer
@@ -16,6 +17,7 @@ namespace SleepTimer
     static class PerformanceChecks
     {
         const BindingFlags Fields = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        static string placementMode = "none";
         [DllImport("user32.dll")] static extern int GetGuiResources(IntPtr process, int flags);
         static T Field<T>(object owner, string name)
         {
@@ -49,12 +51,36 @@ namespace SleepTimer
                     MiB(working.Min()).ToString("F2", CultureInfo.InvariantCulture), MiB(working.Max()).ToString("F2", CultureInfo.InvariantCulture),
                     MiB(memory.Min()).ToString("F2", CultureInfo.InvariantCulture), MiB(memory.Max()).ToString("F2", CultureInfo.InvariantCulture),
                     MiB(managed.Min()).ToString("F2", CultureInfo.InvariantCulture), MiB(managed.Max()).ToString("F2", CultureInfo.InvariantCulture),
-                    gdi, GetGuiResources(process.Handle, 0), handles, process.HandleCount, widget?.IsVisible == true);
+                    gdi, GetGuiResources(process.Handle, 0), handles, process.HandleCount, widget?.IsVisible == true, placementMode);
                 File.AppendAllText(output, row + Environment.NewLine);
                 Console.WriteLine("PERF " + row);
                 if (!baseline && name.StartsWith("idle") && core > 2)
                     throw new Exception("Unexpected idle CPU: " + core.ToString("F2") + "% of one core");
             }
+        }
+
+        static async Task EnableWidget(MainWindow window)
+        {
+            Call(window, "SetTaskbarTimer", true);
+            await Task.Delay(2000);
+            if (Field<Window>(window, "taskbarTimer").IsVisible) { placementMode = "native"; return; }
+            // Hosted CI desktops may have no accessible tray slot. Measure the actual widget's rendering
+            // at a controlled on-screen location, and explicitly distinguish this from native discovery.
+            Call(window, "SetTaskbarTimer", false);
+            var widgetType = window.GetType().Assembly.GetType("SleepTimer.TaskbarTimer");
+            object[] arguments = {
+                new Action(() => { }), new Action(() => { }), new Action(() => { }),
+                new Action<int, ModifierKeys>((delta, keys) => { }),
+                new Func<int, int, System.Drawing.Rectangle?>((width, height) => new System.Drawing.Rectangle(16, 16, width, height)),
+                new Func<System.Drawing.Rectangle, bool>(bounds => true), new Action(() => { })
+            };
+            var constructor = widgetType.GetConstructors().Single();
+            var widget = (Window)constructor.Invoke(arguments.Take(constructor.GetParameters().Length).ToArray());
+            window.GetType().GetField("taskbarTimer", Fields).SetValue(window, widget);
+            Call(window, "UpdateView", false); await Task.Delay(1000);
+            if (!widget.IsVisible) throw new Exception("Controlled widget did not become visible");
+            placementMode = "controlled";
+            Console.WriteLine("PERF Native taskbar slot unavailable; measuring widget rendering with controlled placement.");
         }
 
         static async Task CheckCycles(MainWindow window, string output)
@@ -84,18 +110,20 @@ namespace SleepTimer
 
         static async Task Run(MainWindow window, bool baseline, string output)
         {
-            File.WriteAllText(output, "phase,seconds,cpu_one_core_percent,cpu_machine_percent,working_min_mib,working_max_mib,private_min_mib,private_max_mib,managed_min_mib,managed_max_mib,gdi_before,gdi_after,handles_before,handles_after,widget_visible\n");
+            File.WriteAllText(output, "phase,seconds,cpu_one_core_percent,cpu_machine_percent,working_min_mib,working_max_mib,private_min_mib,private_max_mib,managed_min_mib,managed_max_mib,gdi_before,gdi_after,handles_before,handles_after,widget_visible,placement_mode\n");
             Console.WriteLine("PERF environment: " + Environment.OSVersion + "; CLR " + Environment.Version + "; logical processors " + Environment.ProcessorCount);
             await Measure(window, "idle_tray", 30, baseline, output);
-            if (window.GetType().GetMethod("SetTaskbarTimer", Fields) == null) return;
-            Call(window, "SetTaskbarTimer", true);
-            await Measure(window, "idle_tray_widget", 30, baseline, output);
-            if (baseline) return;
+            bool supportsWidget = window.GetType().GetMethod("SetTaskbarTimer", Fields) != null;
+            if (supportsWidget)
+            {
+                await EnableWidget(window);
+                await Measure(window, "idle_tray_widget", 30, baseline, output);
+            }
             Call(window, "StartPause");
-            await Measure(window, "running_tray_widget", 45, false, output);
+            await Measure(window, supportsWidget ? "running_tray_widget" : "running_tray", 45, baseline, output);
             window.ShowWindow();
-            await Measure(window, "running_window_widget", 30, false, output);
-            await CheckCycles(window, Path.ChangeExtension(output, ".cycles.txt"));
+            await Measure(window, supportsWidget ? "running_window_widget" : "running_window", 30, baseline, output);
+            if (!baseline && supportsWidget) await CheckCycles(window, Path.ChangeExtension(output, ".cycles.txt"));
         }
 
         [STAThread] static int Main(string[] args)

@@ -403,6 +403,42 @@ namespace SleepTimer
             finally { Close(hiding); }
         }
 
+        static void CheckCountdownAnimation(TimerFace face)
+        {
+            Console.WriteLine("CHECK: continuous countdown and independent edit clocks");
+            face.State = TimerState.Running; face.Snap(120);
+            var elapsed = Stopwatch.StartNew();
+            face.UpdatePosition(120, false, true);
+            double end = Field<double>(face, "countdownEnd");
+            Pump(350);
+            Check(face.Position < 120 && face.Position > 119.3, "Countdown did not advance between status updates");
+            face.UpdatePosition(120 - elapsed.Elapsed.TotalSeconds, false, true);
+            Check(Field<double>(face, "countdownEnd") == end, "Status refresh replaced the continuous clocks");
+            Pump(900);
+            Check(face.Position < 119.2 && face.Position > 118.2, "Countdown stopped at the old 100 ms handoff");
+
+            face.CircleMilliseconds = 120; face.CounterMilliseconds = 900;
+            elapsed.Restart(); face.UpdatePosition(240, true, true); Pump(250);
+            Check(face.Position > 239 && face.Position < 240, "Running circle edit did not settle onto the countdown");
+            Check(face.CounterPosition > 120 && face.CounterPosition < 239, "Running text lost its independent edit duration");
+            face.UpdatePosition(240 - elapsed.Elapsed.TotalSeconds, false, true); Pump(750);
+            Check(face.Position > 238.5 && face.Position < 239.5 && Math.Abs(face.Position - face.CounterPosition) < .15,
+                "Edit offset did not hand off to the continuous countdown");
+            face.State = TimerState.Paused; face.UpdatePosition(238, false, false); Pump(200);
+            Check(face.Position == 238 && face.CounterPosition == 238 && !face.HasAnimatedProperties,
+                "Pausing did not freeze and release the countdown clocks");
+
+            face.State = TimerState.Running; face.UpdatePosition(120, false, true); Pump(150);
+            face.UpdatePosition(60, false, true);
+            Check(face.Position > 59.8 && face.Position <= 60, "Changed deadline did not re-anchor the animation");
+            face.CircleMilliseconds = face.CounterMilliseconds = 0;
+            face.UpdatePosition(240, true, true);
+            Check(face.Position == 240 && face.CounterPosition == 240, "Zero-duration running edit was not immediate");
+            Pump(150); Check(face.Position < 240, "Zero-duration edit stopped the countdown");
+            face.CircleMilliseconds = face.CounterMilliseconds = TimerFace.EditMilliseconds;
+            face.State = TimerState.Idle; face.Snap(1800);
+        }
+
         static void CheckIdleScheduling(MainWindow window)
         {
             Console.WriteLine("CHECK: idle and background scheduling");
@@ -420,9 +456,11 @@ namespace SleepTimer
                 Call(window, "SetAwake", 0); Call(window, "StartPause");
                 Check(ticker.IsEnabled && ticker.Interval == TimeSpan.FromSeconds(1), "Hidden countdown must update once a second");
                 window.Show();
-                Check(ticker.Interval == TimeSpan.FromMilliseconds(100), "Visible countdown lost smooth updates");
+                Check(ticker.Interval == TimeSpan.FromSeconds(1) && Field<TimerFace>(window, "face").HasAnimatedProperties,
+                    "Visible countdown must animate independently of the once-a-second status timer");
                 window.Hide(); Call(window, "StartPause");
                 Check(!ticker.IsEnabled && countdown.State == TimerState.Paused, "Paused hidden app must stop status polling");
+                Check(!Field<TimerFace>(window, "face").HasAnimatedProperties, "Hidden face retained its animation clocks");
                 Call(window, "Cancel"); Call(window, "AddTime", 300); Pump(350);
                 Check(!Field<bool>(window, "durationDirty") && Settings.Get("duration", 0) == 2100 && !ticker.IsEnabled,
                     "Idle wheel edits must save without starting status polling");
@@ -468,6 +506,7 @@ namespace SleepTimer
                     var window = Open();
                     try
                     {
+                        CheckCountdownAnimation(Field<TimerFace>(window, "face"));
                         CheckIdleScheduling(window);
                         CheckTaskbarTimer(window);
                         var countdown = Field<Countdown>(window, "countdown");

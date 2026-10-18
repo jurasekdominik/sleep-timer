@@ -900,7 +900,7 @@ namespace SleepTimer
             if (disposed || executing || TestMode) { ticker.Stop(); return; }
             double milliseconds;
             if (countdown.State == TimerState.Running)
-                milliseconds = Math.Min(IsVisible ? 100 : 1000, Math.Max(16, countdown.Remaining * 1000));
+                milliseconds = Math.Min(1000, Math.Max(16, countdown.Remaining * 1000));
             else if (awakeMinutes > 0) milliseconds = 1000;
             else if (IsVisible && countdown.State == TimerState.Idle)
             {
