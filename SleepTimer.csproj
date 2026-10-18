@@ -9,6 +9,7 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo><Deterministic>true</Deterministic>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="UIAutomationClient" /><Reference Include="UIAutomationTypes" />
     <Compile Include="src/*.cs" />
     <Resource Include="assets/SleepTimer.ico" />
   </ItemGroup>

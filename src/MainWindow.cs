@@ -39,6 +39,7 @@ namespace SleepTimer
         readonly ToggleButton awakeSwitch = new ToggleButton();
         readonly ToggleButton startupSwitch = new ToggleButton { IsChecked = Settings.Get("start_with_windows", false) };
         readonly ToggleButton forceSwitch = new ToggleButton { IsChecked = Settings.Get("force", true) };
+        readonly ToggleButton taskbarSwitch = new ToggleButton { IsChecked = Settings.Get("taskbar_timer", false) };
         readonly TextBox accentField = new TextBox { MaxLength = 7, Width = 96, FontSize = 13, Padding = new Thickness(0), TextAlignment = TextAlignment.Center };
         readonly TextBox circleDuration = new TextBox { MaxLength = 5, TextAlignment = TextAlignment.Right };
         readonly TextBox counterDuration = new TextBox { MaxLength = 5, TextAlignment = TextAlignment.Right };
@@ -62,6 +63,7 @@ namespace SleepTimer
         Canvas mode;
         ColorPicker colorPicker;
         Window fontGallery;
+        TaskbarTimer taskbarTimer;
         PowerAction action, quickAction;
         int clockMinute, awakeMinutes, lastQuickMinutes, trayPage, selectedTab;
         double awakeEnd;
@@ -174,6 +176,7 @@ namespace SleepTimer
             };
             new WindowInteropHelper(this).EnsureHandle();
             SyncMode(false); ApplyAwake(); UpdateView();
+            if (taskbarSwitch.IsChecked == true) SetTaskbarTimer(true);
             ticker.Start();
         }
 
@@ -262,20 +265,22 @@ namespace SleepTimer
             tabUnderline.SetResourceReference(Border.BackgroundProperty, "AccentBrush");
             Place(tabs, tabUnderline, 0, 18, tabWidths[0], 2.5);
             Place(settings, tabs, 24, 56, 320, 24);
-            var general = (Canvas)Card(0, 88, 128).Child;
+            var general = (Canvas)Card(0, 88, 184).Child;
             SwitchRow(general, "Start with Windows", "Opens in the tray when you sign in", startupSwitch, 0);
-            SwitchRow(general, "Force close apps", "Skips “save changes?” prompts (/f)", forceSwitch, 64);
+            SwitchRow(general, "Force close apps", "Skips “save changes?” prompts (/f)", forceSwitch, 60);
+            SwitchRow(general, "Taskbar timer", "Beside the hidden-icons arrow", taskbarSwitch, 120);
+            taskbarSwitch.Click += (s, e) => SetTaskbarTimer(taskbarSwitch.IsChecked == true);
             startupSwitch.Click += (s, e) => { bool on = startupSwitch.IsChecked == true; Startup.Set(on); Settings.Set("start_with_windows", on); };
             forceSwitch.Click += (s, e) => Settings.Set("force", forceSwitch.IsChecked == true);
-            var help = (Canvas)Card(0, 232, 184).Child;
+            var help = (Canvas)Card(0, 288, 152).Child;
             string[,] rows = { { "Left-click the ring", "Start · Pause" }, { "Right-click the ring", "Cancel" }, { "Scroll", "±5 min" }, { "Alt + scroll", "±1 min" },
                 { "Shift + scroll", "±15 min" }, { "Ctrl + scroll", "±30 min" }, { "Ctrl+Shift + scroll", "±60 min" }, { "Whole-hour stop", "400 ms" } };
             for (int i = 0; i < rows.GetLength(0); i++)
             {
-                Place(help, Label(rows[i, 0], 12, true), 20, 12 + i * 20, 160, 20);
+                Place(help, Label(rows[i, 0], 12, true), 20, 10 + i * 17, 160, 18);
                 var right = i == rows.GetLength(0) - 1 ? hourStopHelp : Label(rows[i, 1], 12); right.TextAlignment = TextAlignment.Right;
                 if (right == hourStopHelp) right.Text = hourStop.HoldMilliseconds + " ms";
-                Place(help, right, 180, 12 + i * 20, 120, 20);
+                Place(help, right, 180, 10 + i * 17, 120, 18);
             }
             var appearance = (Canvas)Card(1, 88, 160).Child;
             Place(appearance, Label("Accent colour"), 20, 16, 180, 24);
@@ -596,6 +601,20 @@ namespace SleepTimer
         {
             SetFont(AppFonts.Select(key, ui, Settings.Get(ui ? "ui_font_weight" : "timer_font_weight", -1)), ui);
         }
+
+        void SetTaskbarTimer(bool enabled)
+        {
+            taskbarSwitch.IsChecked = enabled;
+            Settings.Set("taskbar_timer", enabled);
+            if (!enabled) { taskbarTimer?.Dispose(); taskbarTimer = null; return; }
+            if (taskbarTimer == null)
+                taskbarTimer = new TaskbarTimer(StartPause, () =>
+                {
+                    Native.GetPhysicalCursorPos(out var point);
+                    trayClick = new Point(point.X, point.Y); ShowTrayMenu();
+                });
+            UpdateView();
+        }
         void ApplyFontWeight(int weight, bool ui)
         {
             SetFont(AppFonts.Select((ui ? AppFonts.Ui : AppFonts.Timer).Key, ui, weight), ui);
@@ -906,6 +925,7 @@ namespace SleepTimer
             TaskbarItemInfo.Description = face.Time + " · " + action.Label + " · "
                 + (idle ? clockMode ? "Scheduled" : "Ready" : state == TimerState.Running ? "Running" : "Paused");
             face.Tone = TimerStatus.Tone(state, seconds); face.UpdatePosition(seconds, animate, state == TimerState.Running);
+            taskbarTimer?.Update(TimeText.Clock(seconds), action.Label, state, idle ? 1 : countdown.Fraction, face.Tone);
             // Tray IPC, menus and unrelated controls refresh on the regular status tick.
             if (dialOnly) return;
             picker.SetCurrent(action.Key); picker.IsEnabled = mode.IsEnabled = idle;
@@ -953,6 +973,7 @@ namespace SleepTimer
             if (TestMode) { countdown.Reset(); UpdateView(); return; }
             ticker.Stop(); countdown.Reset(); ApplyAwake(); executing = true;
             UpdateIcon(0, TimerState.Running, TimerTone.Urgent);
+            taskbarTimer?.Update("00:00", action.FinalSub, TimerState.Running, 0, TimerTone.Urgent);
             face.Interactive = false; face.State = TimerState.Idle; face.Tone = TimerTone.Idle; face.Snap(0);
             face.Title = action.FinalTitle; face.Time = "00:00"; face.Sub = action.FinalSub; face.InvalidateVisual();
             Title = "00:00 · " + action.FinalSub.TrimEnd('.');
@@ -1038,6 +1059,7 @@ namespace SleepTimer
             source?.RemoveHook(WindowMessage);
             face.Snap(0);
             trayMenu.Dispose(); awakeMenu.Dispose(); colorPicker?.Close(); fontGallery?.Close();
+            taskbarTimer?.Dispose(); taskbarTimer = null;
             tray.Visible = false; tray.Icon?.Dispose(); tray.Dispose();
             if (trayHandle != IntPtr.Zero) { Native.DestroyIcon(trayHandle); trayHandle = IntPtr.Zero; }
             Native.KeepAwake(false, false);

@@ -16,6 +16,7 @@ cat > "$check_dir/Checks.csproj" <<'PROJECT'
     <Compile Include="$(SleepTimerRoot)/src/PowerAction.cs" />
     <Compile Include="$(SleepTimerRoot)/src/Shortcut.cs" />
     <Compile Include="$(SleepTimerRoot)/src/ScreenPlacement.cs" />
+    <Compile Include="$(SleepTimerRoot)/src/TaskbarPlacement.cs" />
   </ItemGroup>
 </Project>
 PROJECT
@@ -23,6 +24,7 @@ cat > "$check_dir/Program.cs" <<'CHECKS'
 using System;
 using SleepTimer;
 using System.Linq;
+using System.Drawing;
 class Checks
 {
     static int checks;
@@ -116,6 +118,33 @@ class Checks
             Equal(position.X, sample.Item9, "tray monitor horizontal pixel positioning");
             Equal(position.Y, sample.Item10, "tray monitor vertical pixel positioning");
         }
+        var taskbar = new Rectangle(0, 1040, 1920, 40);
+        var desktop = new Rectangle(0, 0, 1920, 1080);
+        var tray = new Rectangle(1700, 1040, 220, 40);
+        var empty = Array.Empty<Rectangle>();
+        var mini = TaskbarPlacement.LeftOfTray(taskbar, desktop, tray, 124, 32, 4, empty);
+        if (mini != new Rectangle(1572, 1044, 124, 32)) throw new Exception("mini timer sits left of the notification arrow"); checks++;
+        mini = TaskbarPlacement.LeftOfTray(new Rectangle(-1920, 1040, 1920, 40), new Rectangle(-1920, 0, 1920, 1080),
+            new Rectangle(-220, 1040, 220, 40), 124, 32, 4, empty);
+        if (mini != new Rectangle(-348, 1044, 124, 32)) throw new Exception("mini timer follows negative-coordinate monitor"); checks++;
+        mini = TaskbarPlacement.LeftOfTray(new Rectangle(0, 1560, 2880, 60), new Rectangle(0, 0, 2880, 1620),
+            new Rectangle(2550, 1560, 330, 60), 186, 48, 6, empty);
+        if (mini != new Rectangle(2358, 1566, 186, 48)) throw new Exception("mini timer uses scaled physical pixels"); checks++;
+        mini = TaskbarPlacement.LeftOfTray(new Rectangle(0, 0, 1920, 40), desktop, new Rectangle(1700, 0, 220, 40), 124, 32, 4, empty);
+        if (mini != new Rectangle(1572, 4, 124, 32)) throw new Exception("top taskbar alignment"); checks++;
+        if (TaskbarPlacement.LeftOfTray(new Rectangle(0, 1078, 1920, 40), desktop,
+            new Rectangle(1700, 1078, 220, 40), 124, 32, 4, empty) != null) throw new Exception("auto-hidden taskbar must hide timer"); checks++;
+        if (TaskbarPlacement.LeftOfTray(taskbar, desktop, tray, 124, 32, 4,
+            new[] { new Rectangle(1570, 1040, 100, 40) }) != null) throw new Exception("mini timer must not cover an application button"); checks++;
+        if (TaskbarPlacement.LeftOfTray(taskbar, desktop, tray, 124, 32, 4,
+            new[] { new Rectangle(1400, 1040, 168, 40) }) == null) throw new Exception("nonoverlapping application buttons are allowed"); checks++;
+        if (TaskbarPlacement.LeftOfTray(taskbar, desktop, new Rectangle(100, 1040, 1820, 40),
+            124, 32, 4, empty) != null) throw new Exception("insufficient taskbar room must hide timer"); checks++;
+        if (TaskbarPlacement.LeftOfTray(new Rectangle(0, 0, 40, 1080), desktop, new Rectangle(0, 900, 40, 180),
+            124, 32, 4, empty) != null) throw new Exception("vertical taskbar must not be covered"); checks++;
+        if (TaskbarPlacement.LeftOfTray(taskbar, desktop, tray, 124, 48, 4, empty) != null) throw new Exception("timer cannot spill above taskbar"); checks++;
+        if (TaskbarPlacement.LeftOfTray(taskbar, desktop, new Rectangle(1700, 500, 220, 40),
+            124, 32, 4, empty) != null) throw new Exception("stale tray bounds must be rejected"); checks++;
         var zone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Prague");
         var fall = new DateTimeOffset(2026, 10, 25, 1, 30, 0, TimeSpan.FromHours(2));
         Equal((TimeText.NextOccurrence(fall, 210, zone) - fall).TotalHours, 3, "fall clock transition");

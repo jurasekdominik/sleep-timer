@@ -167,6 +167,52 @@ namespace SleepTimer
             Check(countdown.State == TimerState.Idle, "Unbound shortcut still fires");
         }
 
+        static void CheckTaskbarTimer(MainWindow window)
+        {
+            Console.WriteLine("CHECK: mini taskbar timer");
+            Check(!Settings.Get("taskbar_timer", false) && Field<TaskbarTimer>(window, "taskbarTimer") == null,
+                "Taskbar timer must be off by default");
+            var area = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
+            var target = new Rectangle(area.Right - 400, area.Bottom - 48, 124, 32);
+            int toggled = 0, menus = 0, suppressed = 0;
+            using (var mini = new TaskbarTimer(() => toggled++, () => menus++,
+                (width, height) => System.Threading.Volatile.Read(ref suppressed) == 0 ? target : (Rectangle?)null))
+            {
+                mini.Update("2:25:00", "Shut down", TimerState.Running, .5, TimerTone.Running);
+                Pump(700);
+                Check(mini.IsVisible && !mini.ShowInTaskbar && !mini.ShowActivated && mini.Owner == null,
+                    "Mini timer must appear independently without an extra taskbar button or activation");
+                GetWindowRect(new WindowInteropHelper(mini).Handle, out var bounds);
+                Check(bounds.Left == target.Left && bounds.Top == target.Top, "Mini timer ignored physical taskbar bounds");
+                Check(Field<TextBlock>(mini, "time").Text == "2:25:00"
+                    && Field<TextBlock>(mini, "action").Text == "Shut down", "Mini timer must show time and action");
+                Check(Field<double>(Field<object>(mini, "ring"), "Fraction") == .5,
+                    "Mini ring lost total-countdown progress");
+                CaptureControl((FrameworkElement)mini.Content, "wpf-taskbar-timer");
+                window.Hide(); Pump(50); Check(mini.IsVisible, "Mini timer disappeared with the main window");
+                window.Show();
+                var button = Field<Border>(mini, "button");
+                button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+                    { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+                button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
+                    { RoutedEvent = UIElement.MouseRightButtonUpEvent });
+                Check(toggled == 1 && menus == 1, "Mini timer click actions were not dispatched once");
+                mini.Update("2:24:59", "Sleep", TimerState.Paused, .4, TimerTone.Paused);
+                Check(Field<TextBlock>(mini, "time").Text == "2:24:59" && button.ToolTip.ToString().Contains("Paused"),
+                    "Paused mini timer is stale or missing state");
+                System.Threading.Volatile.Write(ref suppressed, 1); Pump(1600);
+                Check(!mini.IsVisible, "Mini timer must hide when taskbar placement is unavailable");
+                mini.Dispose();
+                Check(!Field<DispatcherTimer>(mini, "placement").IsEnabled, "Mini timer polling survives disposal");
+            }
+            Call(window, "SetTaskbarTimer", true);
+            Check(Settings.Get("taskbar_timer", false) && Field<TaskbarTimer>(window, "taskbarTimer") != null,
+                "Mini timer setting is not saved or applied");
+            Call(window, "SetTaskbarTimer", false);
+            Check(!Settings.Get("taskbar_timer", true) && Field<TaskbarTimer>(window, "taskbarTimer") == null,
+                "Disabling mini timer failed to save or dispose it");
+        }
+
         [STAThread] static int Main()
         {
             // Preserve the caller's settings. No expiry polling or power action runs in this suite.
@@ -176,6 +222,7 @@ namespace SleepTimer
                 try
                 {
                     Settings.Set("start_with_windows", false); Settings.Set("awake", false);
+                    Settings.Set("taskbar_timer", false);
                     Settings.Set("clock_mode", false); Settings.Set("duration", 1800);
                     Settings.Set("circle_sweep_ms", 600); Settings.Set("counter_sweep_ms", 600);
                     Settings.Set("timer_font", "segoe"); Settings.Set("ui_font", "segoe");
@@ -189,6 +236,7 @@ namespace SleepTimer
                     var window = Open();
                     try
                     {
+                        CheckTaskbarTimer(window);
                         var countdown = Field<Countdown>(window, "countdown");
                         var face = Field<TimerFace>(window, "face");
                         Call(window, "SetAction", "shutdown");
