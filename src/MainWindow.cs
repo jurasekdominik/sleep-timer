@@ -611,7 +611,7 @@ namespace SleepTimer
                 taskbarTimer = new TaskbarTimer(StartPause, () =>
                 {
                     Native.GetPhysicalCursorPos(out var point);
-                    trayClick = new Point(point.X, point.Y); OpenTrayMenu(false);
+                    trayClick = new Point(point.X, point.Y); ShowTrayMenu();
                 });
             UpdateView();
         }
@@ -854,14 +854,13 @@ namespace SleepTimer
             return menu;
         }
         void SetTrayPage(int page) { trayPage = page; trayMenu.SetRows(TrayRows()); }
-        void ShowTrayMenu() => OpenTrayMenu(true);
-        void OpenTrayMenu(bool activate)
+        void ShowTrayMenu()
         {
             // Native tray clicks do not bubble through a WPF anchor button.
             // Honor a fresh request even if an earlier popup just lost capture.
             if (trayMenu.Visible || disposed) return;
-            if (activate) Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
-            trayPage = 0; trayMenu.Show(TrayRows(), this, screenPosition: trayClick);
+            // Activate the visible popup, not a hidden main window, so outside clicks dismiss it normally.
+            trayPage = 0; trayMenu.Show(TrayRows(), this, screenPosition: trayClick, activate: true);
         }
         void SetAwake(int minutes)
         {

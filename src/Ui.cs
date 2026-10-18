@@ -549,6 +549,7 @@ namespace SleepTimer
         string rowSignature;
         Point? screenAnchor;
         HwndSource pinnedSource;
+        bool activateOnOpen;
         IntPtr PinPosition(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (message == 0x0046 && screenAnchor.HasValue)
@@ -588,6 +589,8 @@ namespace SleepTimer
                             new Native.ScreenPoint { X = (int)screenAnchor.Value.X, Y = (int)screenAnchor.Value.Y });
                     }
                 }
+                if (activateOnOpen && PresentationSource.FromVisual(border) is HwndSource menuSource)
+                    Native.SetForegroundWindow(menuSource.Handle);
                 border.Focus();
             };
             border.PreviewKeyDown += (s, e) =>
@@ -660,8 +663,9 @@ namespace SleepTimer
             }
             scroll.ScrollToVerticalOffset(scrollOffset);
         }
-        public void Show(IEnumerable<MenuRow> rows, UIElement anchor = null, bool above = false, Point? screenPosition = null, bool alignRight = false)
+        public void Show(IEnumerable<MenuRow> rows, UIElement anchor = null, bool above = false, Point? screenPosition = null, bool alignRight = false, bool activate = false)
         {
+            activateOnOpen = activate;
             var entries = rows.ToArray();
             bool overlay = anchor != null && entries.Length > 0 && entries[0].Header;
             SetRows(entries);

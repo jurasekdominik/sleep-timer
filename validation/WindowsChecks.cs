@@ -257,7 +257,12 @@ namespace SleepTimer
             var quitter = Open();
             try
             {
-                Call(quitter, "Quit");
+                Set(quitter, "trayClick", quitter.PointToScreen(new System.Windows.Point(300, 450)));
+                Call(quitter, "ShowTrayMenu"); Pump(100);
+                var menu = Field<PopupMenu>(quitter, "trayMenu");
+                var quit = Field<StackPanel>(menu, "items").Children.OfType<Button>().Last();
+                quit.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                Check(!menu.Visible, "Quit did not dismiss the context menu immediately");
                 Check(!Field<bool>(quitter, "disposed"), "Quit must let the menu's mouse event finish before teardown");
                 Pump(100);
                 Check(Field<bool>(quitter, "disposed") && !quitter.IsVisible, "Deferred Quit did not close the app window");
