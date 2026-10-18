@@ -62,20 +62,19 @@ namespace SleepTimer
         static void Pump(int milliseconds)
         {
             var frame = new DispatcherFrame();
-            // Rendering and popup input can starve a Background-priority stop timer.
-            var stop = new DispatcherTimer(DispatcherPriority.Send) { Interval = TimeSpan.FromMilliseconds(milliseconds) };
-            stop.Tick += (s, e) => { stop.Stop(); frame.Continue = false; };
-            stop.Start(); Dispatcher.PushFrame(frame);
+            // Popup/input processing can suspend Win32 dispatcher timers. Post the stop
+            // from the thread pool so the test deadline does not depend on those timers.
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            using (var stop = new System.Threading.Timer(s =>
+                dispatcher.BeginInvoke(DispatcherPriority.Send, (Action)(() => frame.Continue = false)),
+                null, milliseconds, System.Threading.Timeout.Infinite))
+                Dispatcher.PushFrame(frame);
         }
-        static MainWindow Open(bool trace = false)
+        static MainWindow Open()
         {
-            if (trace) Console.WriteLine("CHECK: window constructor");
             var window = new MainWindow { TestMode = true };
-            if (trace) Console.WriteLine("CHECK: window constructed");
             Field<DispatcherTimer>(window, "ticker").Stop();
-            window.Show();
-            if (trace) Console.WriteLine("CHECK: window shown");
-            window.UpdateLayout(); return window;
+            window.Show(); window.UpdateLayout(); return window;
         }
         static void Close(MainWindow window) { Set(window, "quitting", true); window.Close(); window.Dispose(); }
         static void Capture(MainWindow window, string name)
@@ -311,7 +310,7 @@ namespace SleepTimer
             Check(!Settings.Get("taskbar_timer", true) && Field<TaskbarTimer>(window, "taskbarTimer") == null,
                 "Disabling mini timer failed to save or dispose it");
             Console.WriteLine("CHECK: widget menu quit window");
-            var quitter = Open(true);
+            var quitter = Open();
             Console.WriteLine("CHECK: widget menu quit opened");
             try
             {

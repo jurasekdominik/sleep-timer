@@ -39,22 +39,19 @@ namespace SleepTimer
                 var info = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
                 if (!GetMonitorInfo(monitor, ref info)) return null;
                 var root = AutomationElement.FromHandle(bar);
-                // Do not enumerate notification icons: Explorer can call their owning UI
-                // threads while the app is creating a window or updating its tray icon.
-                var taskList = root.FindFirst(TreeScope.Descendants,
-                    new OrCondition(new PropertyCondition(AutomationElement.ClassNameProperty, "Taskbar.TaskbarFrame"),
-                        new PropertyCondition(AutomationElement.ClassNameProperty, "MSTaskListWClass")));
-                if (taskList == null) return null;
-                var buttons = taskList.FindAll(TreeScope.Descendants,
+                var buttons = root.FindAll(TreeScope.Descendants,
                     new OrCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
                         new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)));
                 var occupied = new List<Rectangle>();
+                Rectangle? overflow = null;
                 foreach (AutomationElement button in buttons)
                 {
                     var current = button.Current;
                     if (current.IsOffscreen || current.BoundingRectangle.IsEmpty) continue;
                     var bounds = Pixels(current.BoundingRectangle);
                     occupied.Add(bounds);
+                    // Locale-independent Windows 11 overflow-button identifier.
+                    if (current.AutomationId == "SystemTray.OverflowButton" || current.ClassName == "SystemTray.OverflowButton") overflow = bounds;
                 }
                 // Use one consistent outer notification-area edge. Switching between a
                 // transient chevron and its parent caused jumps when the DND bell appeared.
@@ -69,6 +66,7 @@ namespace SleepTimer
                     if (frame != null && !frame.Current.IsOffscreen && !frame.Current.BoundingRectangle.IsEmpty)
                         anchor = Pixels(frame.Current.BoundingRectangle);
                 }
+                if (!anchor.HasValue) anchor = overflow;
                 if (!anchor.HasValue) return null;
                 double scale = Math.Max(96, GetDpiForWindow(bar)) / 96d;
                 return TaskbarPlacement.LeftOfTray(rect.Value, info.Bounds.Value, anchor.Value,
