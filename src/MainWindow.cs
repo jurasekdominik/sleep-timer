@@ -158,8 +158,12 @@ namespace SleepTimer
             StateChanged += (s, e) => { if (WindowState == WindowState.Minimized) Hide(); };
             Closing += (s, e) =>
             {
-                if (!quitting) { e.Cancel = true; Hide(); return; }
-                if (!TestMode && !sessionEnding && countdown.State != TimerState.Idle && !ConfirmQuit()) { quitting = false; e.Cancel = true; return; }
+                if (!quitting)
+                {
+                    e.Cancel = true;
+                    Dispatcher.BeginInvoke((Action)(() => { if (!disposed && !quitting) Hide(); }));
+                    return;
+                }
                 Dispose();
                 if (!TestMode) Application.Current.Shutdown();
             };
@@ -1047,7 +1051,12 @@ namespace SleepTimer
         void Quit()
         {
             // Let the menu finish releasing mouse capture before closing windows and tray handles.
-            Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() => { if (!disposed) { quitting = true; Close(); } }));
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() =>
+            {
+                if (disposed || quitting) return;
+                if (!TestMode && !sessionEnding && countdown.State != TimerState.Idle && !ConfirmQuit()) return;
+                quitting = true; Close();
+            }));
         }
         IntPtr WindowMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {

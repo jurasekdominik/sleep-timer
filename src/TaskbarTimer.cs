@@ -105,11 +105,8 @@ namespace SleepTimer
             };
             // Follow both taskbar activation and games becoming foreground, without taking focus.
             foregroundHook = SetWinEventHook(3, 3, IntPtr.Zero, foregroundChanged, 0, 0, 2);
-            Closed += (s, e) =>
-            {
-                disposed = true; placement.Stop(); source?.RemoveHook(WindowMessage);
-                if (foregroundHook != IntPtr.Zero) { UnhookWinEvent(foregroundHook); foregroundHook = IntPtr.Zero; }
-            };
+            Closing += (s, e) => Stop();
+            Closed += (s, e) => Stop();
             placement.Tick += (s, e) => RefreshPlacement();
             new WindowInteropHelper(this).EnsureHandle();
             RefreshPlacement(); placement.Start();
@@ -197,7 +194,18 @@ namespace SleepTimer
             ring.Fraction = fraction; ring.State = state; ring.Tone = tone; ring.InvalidateVisual();
         }
 
-        public void Dispose() { if (!disposed) Close(); }
+        void Stop()
+        {
+            if (disposed) return;
+            disposed = true; placement.Stop(); source?.RemoveHook(WindowMessage);
+            if (foregroundHook != IntPtr.Zero) { UnhookWinEvent(foregroundHook); foregroundHook = IntPtr.Zero; }
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            Stop(); Close();
+        }
 
         sealed class MiniRing : FrameworkElement
         {

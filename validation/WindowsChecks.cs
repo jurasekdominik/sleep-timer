@@ -311,6 +311,13 @@ namespace SleepTimer
                     foreground.DynamicInvoke(IntPtr.Zero, (uint)3, IntPtr.Zero, 0, 0, (uint)0, (uint)0);
                 Pump(50);
                 Check(!Field<bool>(defaults, "foregroundRefreshQueued"), "Default foreground refresh never completed");
+                Set(defaults, "previous", (Rectangle?)target);
+                defaults.Closing += (s, e) =>
+                {
+                    // Window.Hide/Show are forbidden here, including calls from callbacks.
+                    Call(defaults, "RefreshTaskbarLayer"); Call(defaults, "RefreshPlacement");
+                    foreground.DynamicInvoke(IntPtr.Zero, (uint)3, IntPtr.Zero, 0, 0, (uint)0, (uint)0);
+                };
             }
             Console.WriteLine("CHECK: widget at-time controls");
             Call(window, "SetTaskbarTimer", true);
@@ -367,6 +374,20 @@ namespace SleepTimer
                 Check(Field<bool>(quitter, "disposed") && !quitter.IsVisible, "Deferred Quit did not close the app window");
             }
             finally { if (!Field<bool>(quitter, "disposed")) Close(quitter); }
+            Console.WriteLine("CHECK: close to tray with active timer");
+            var hiding = Open();
+            try
+            {
+                Call(hiding, "StartPause");
+                hiding.Close(); // Closing must cancel first; Hide runs after WPF finishes the event.
+                Pump(50);
+                Check(!hiding.IsVisible && !Field<bool>(hiding, "disposed")
+                    && Field<Countdown>(hiding, "countdown").State == TimerState.Running,
+                    "Closing to tray disposed the app or stopped its active timer");
+                hiding.ShowWindow();
+                Check(hiding.IsVisible, "Window cannot be restored after closing to tray");
+            }
+            finally { Close(hiding); }
         }
 
         [STAThread] static int Main()
