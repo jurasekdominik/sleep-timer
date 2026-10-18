@@ -61,7 +61,8 @@ namespace SleepTimer
         static void Pump(int milliseconds)
         {
             var frame = new DispatcherFrame();
-            var stop = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(milliseconds) };
+            // Rendering and popup input can starve a Background-priority stop timer.
+            var stop = new DispatcherTimer(DispatcherPriority.Send) { Interval = TimeSpan.FromMilliseconds(milliseconds) };
             stop.Tick += (s, e) => { stop.Stop(); frame.Continue = false; };
             stop.Start(); Dispatcher.PushFrame(frame);
         }
@@ -482,7 +483,9 @@ namespace SleepTimer
                         var anchor = Field<Button>(visual, "awakeChip");
                         for (int i = 0; i < 2; i++)
                         {
+                            Console.WriteLine("CHECK: keep-awake popup open " + i);
                             awake.Show(new[] { new MenuRow { Text = "Off" } }, anchor);
+                            Console.WriteLine("CHECK: keep-awake popup shown " + i);
                             Pump(100);
                             Check(awake.Visible, "WPF popup did not reopen");
                             var panel = Field<StackPanel>(awake, "items");
