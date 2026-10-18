@@ -62,13 +62,19 @@ namespace SleepTimer
         static void Pump(int milliseconds)
         {
             var frame = new DispatcherFrame();
-            // Popup/input processing can suspend Win32 dispatcher timers. Post the stop
-            // from the thread pool so the test deadline does not depend on those timers.
+            // Keep normal dispatcher timer processing active, with an independent deadline
+            // for popup/input states that suspend Win32 timers.
             var dispatcher = Dispatcher.CurrentDispatcher;
-            using (var stop = new System.Threading.Timer(s =>
+            var stop = new DispatcherTimer(DispatcherPriority.Send) { Interval = TimeSpan.FromMilliseconds(milliseconds) };
+            stop.Tick += (s, e) => frame.Continue = false;
+            using (var deadline = new System.Threading.Timer(s =>
                 dispatcher.BeginInvoke(DispatcherPriority.Send, (Action)(() => frame.Continue = false)),
-                null, milliseconds, System.Threading.Timeout.Infinite))
-                Dispatcher.PushFrame(frame);
+                null, milliseconds + 250, System.Threading.Timeout.Infinite))
+            {
+                stop.Start();
+                try { Dispatcher.PushFrame(frame); }
+                finally { stop.Stop(); }
+            }
         }
         static void PumpUntil(Func<bool> ready, int timeout, string message)
         {
@@ -254,8 +260,18 @@ namespace SleepTimer
                 Check(!mini.IsVisible, "Returning from a game must not flash at the stale pre-DND position");
                 Field<Stopwatch>(mini, "probeAge").Reset(); Pump(100);
                 Check(!mini.IsVisible, "Notification-area layout must settle before showing the timer");
-                PumpUntil(() => mini.IsVisible && GetWindowRect(new WindowInteropHelper(mini).Handle, out var settled)
-                    && settled.Left == target.Left - 32, 4000, "Timer did not return at the settled notification-area edge");
+                try
+                {
+                    PumpUntil(() => mini.IsVisible && GetWindowRect(new WindowInteropHelper(mini).Handle, out var settled)
+                        && settled.Left == target.Left - 32, 4000, "Timer did not return at the settled notification-area edge");
+                }
+                catch
+                {
+                    Console.WriteLine("PLACEMENT: visible=" + mini.IsVisible + "; previous=" + Field<Rectangle?>(mini, "previous")
+                        + "; pending=" + Field<Rectangle?>(mini, "pending") + "; probe=" + Field<System.Threading.Tasks.Task<Rectangle?>>(mini, "probe")?.Status
+                        + "; age=" + Field<Stopwatch>(mini, "probeAge").ElapsedMilliseconds);
+                    throw;
+                }
                 Console.WriteLine("CHECK: widget pointer controls");
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
                     { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
