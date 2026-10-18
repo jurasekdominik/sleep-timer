@@ -103,6 +103,12 @@ namespace SleepTimer
             return !front.Value.Contains(target);
         }
 
+        public static bool IsShellOverlayForeground()
+        {
+            GetWindowThreadProcessId(GetForegroundWindow(), out uint process);
+            return IsShellOverlay(process);
+        }
+
         static bool IsShellOverlay(uint process)
         {
             if (process != lastForegroundProcess)

@@ -272,43 +272,54 @@ namespace SleepTimer
             }
             Console.WriteLine("CHECK: widget at-time controls");
             Call(window, "SetTaskbarTimer", true);
+            Console.WriteLine("CHECK: widget enabled");
             Check(Settings.Get("taskbar_timer", false) && Field<TaskbarTimer>(window, "taskbarTimer") != null,
                 "Mini timer setting is not saved or applied");
             var live = Field<TaskbarTimer>(window, "taskbarTimer");
             var countdown = Field<Countdown>(window, "countdown");
             Call(window, "SetMode", true); Set(window, "clockMinute", 6 * 60 + 20); Call(window, "UpdateView", false);
+            Console.WriteLine("CHECK: widget at-time ready");
             Check(countdown.State == TimerState.Idle && Field<TextBlock>(live, "time").Text == "At 06:20"
                 && Field<TextBlock>(live, "action").Text.Contains("Ready"), "Idle at-time widget must show the clock target and Ready");
             Field<Border>(live, "button").RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, 120)
                 { RoutedEvent = UIElement.MouseWheelEvent });
             Call(window, "UpdateView", false);
             Check(Field<int>(window, "clockMinute") == 6 * 60 + 25, "Widget scrolling did not edit the selected clock time");
+            Console.WriteLine("CHECK: widget at-time start");
             Call(window, "StartPause"); var deadline = countdown.TargetTime;
             Check(deadline.HasValue && Field<TextBlock>(live, "time").Text == "At 06:25", "At-time start did not use the absolute deadline");
-            Call(window, "StartPause"); double paused = countdown.Remaining; Pump(60); Call(window, "StartPause");
+            Console.WriteLine("CHECK: widget at-time pause");
+            Call(window, "StartPause"); double paused = countdown.Remaining; Pump(60);
+            Console.WriteLine("CHECK: widget at-time resume");
+            Call(window, "StartPause");
             Check(countdown.TargetTime == deadline && countdown.Remaining < paused, "At-time resume shifted the selected deadline");
             Field<Border>(live, "button").RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
                 { RoutedEvent = UIElement.MouseRightButtonUpEvent });
             Check(countdown.State == TimerState.Idle && !countdown.TargetTime.HasValue, "Widget right-click did not cancel the real timer");
+            Console.WriteLine("CHECK: widget duration controls");
             Call(window, "SetMode", false); countdown.SetDuration(1800); Call(window, "UpdateView", false);
             Field<Border>(live, "button").RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, 120)
                 { RoutedEvent = UIElement.MouseWheelEvent });
             Check(countdown.Duration == 2100, "Widget scrolling did not add five minutes in duration mode");
             countdown.SetDuration(1800); Call(window, "UpdateView", false);
             Call(window, "SetTaskbarTimer", false);
+            Console.WriteLine("CHECK: widget disabled");
             Check(!Settings.Get("taskbar_timer", true) && Field<TaskbarTimer>(window, "taskbarTimer") == null,
                 "Disabling mini timer failed to save or dispose it");
+            Console.WriteLine("CHECK: widget menu quit window");
             var quitter = Open();
             try
             {
                 Set(quitter, "trayClick", quitter.PointToScreen(new System.Windows.Point(300, 450)));
                 Call(quitter, "ShowTrayMenu"); Pump(100);
+                Console.WriteLine("CHECK: widget menu quit click");
                 var menu = Field<PopupMenu>(quitter, "trayMenu");
                 var quit = Field<StackPanel>(menu, "items").Children.OfType<Button>().Last();
                 quit.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
                 Check(!menu.Visible, "Quit did not dismiss the context menu immediately");
                 Check(!Field<bool>(quitter, "disposed"), "Quit must let the menu's mouse event finish before teardown");
                 Pump(100);
+                Console.WriteLine("CHECK: widget menu quit complete");
                 Check(Field<bool>(quitter, "disposed") && !quitter.IsVisible, "Deferred Quit did not close the app window");
             }
             finally { if (!Field<bool>(quitter, "disposed")) Close(quitter); }

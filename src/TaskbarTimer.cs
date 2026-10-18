@@ -17,7 +17,7 @@ namespace SleepTimer
         readonly Border button;
         readonly TextBlock time = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 12, FontWeight = FontWeights.SemiBold };
         readonly TextBlock action = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 11, FontWeight = FontWeights.Normal };
-        readonly MiniRing ring = new MiniRing { Width = 28, Height = 28, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
+        readonly MiniRing ring = new MiniRing { Width = 28, Height = 28, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         readonly DispatcherTimer placement = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         readonly Func<int, int, PixelRectangle?> locate;
         readonly Func<PixelRectangle, bool> canShow;
@@ -57,9 +57,9 @@ namespace SleepTimer
             TextOptions.SetTextRenderingMode(this, TextRenderingMode.Grayscale);
             var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             text.Children.Add(time); text.Children.Add(action);
-            var content = new Grid(); content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            content.ColumnDefinitions.Add(new ColumnDefinition()); content.Children.Add(ring);
-            Grid.SetColumn(text, 1); content.Children.Add(text);
+            var content = new Grid(); content.ColumnDefinitions.Add(new ColumnDefinition());
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); content.Children.Add(text);
+            Grid.SetColumn(ring, 1); content.Children.Add(ring);
             // Alpha 1 looks transparent while preserving native hit testing over the entire rectangle.
             button = new Border { Child = content, Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)),
                 Padding = new Thickness(5, 0, 5, 0), Cursor = Cursors.Hand };
@@ -163,7 +163,11 @@ namespace SleepTimer
                 var at = previous.Value;
                 SetWindowPos(source.Handle, IntPtr.Zero, at.X, at.Y, at.Width, at.Height, 0x0214);
             }
-            FollowTaskbarLayer(FindWindow("Shell_TrayWnd", null));
+            if (TaskbarLocator.IsShellOverlayForeground())
+                // Start/Search have screen-sized host windows. Keep the taskbar timer above
+                // that shell surface without activating it; games still use the taskbar layer.
+                SetWindowPos(source.Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x0213);
+            else FollowTaskbarLayer(FindWindow("Shell_TrayWnd", null));
         }
 
         void FollowTaskbarLayer(IntPtr taskbar)
