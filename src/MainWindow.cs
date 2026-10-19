@@ -639,12 +639,19 @@ namespace SleepTimer
             Settings.Set("taskbar_timer", enabled);
             if (!enabled) { taskbarTimer?.Dispose(); taskbarTimer = null; return; }
             if (taskbarTimer == null)
-                taskbarTimer = new TaskbarTimer(StartPause, Cancel, () =>
+                taskbarTimer = new TaskbarTimer(StartPause, () =>
                 {
-                    Native.GetPhysicalCursorPos(out var point);
-                    trayClick = new Point(point.X, point.Y); ShowTrayMenu();
-                }, face.Scroll, open: ShowWindow, preferNative: Settings.Get("native_taskbar", true));
+                    if (countdown.State != TimerState.Idle) Cancel();
+                    else Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)ShowTaskbarMenu);
+                }, ShowTaskbarMenu, face.Scroll, open: ShowWindow, preferNative: Settings.Get("native_taskbar", true));
             UpdateView();
+        }
+        void ShowTaskbarMenu()
+        {
+            if (disposed) return;
+            ToolTips.Dismiss();
+            Native.GetPhysicalCursorPos(out var point);
+            trayClick = new Point(point.X, point.Y); ShowTrayMenu();
         }
         void SetTaskbarRenderer(bool native)
         {

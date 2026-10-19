@@ -366,6 +366,26 @@ namespace SleepTimer
             Field<Border>(live, "button").RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
                 { RoutedEvent = UIElement.MouseRightButtonUpEvent });
             Check(countdown.State == TimerState.Idle && !countdown.TargetTime.HasValue, "Widget right-click did not cancel the real timer");
+            var trayMenu = Field<PopupMenu>(window, "trayMenu");
+            Check(!trayMenu.Visible, "Cancelling an active timer also opened its menu");
+            Console.WriteLine("CHECK: idle widget right-click menu");
+            Field<Border>(live, "button").RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
+                { RoutedEvent = UIElement.MouseRightButtonUpEvent });
+            Check(!trayMenu.Visible, "Idle right-click opened the menu before releasing capture");
+            Pump(50);
+            Check(trayMenu.Visible && countdown.State == TimerState.Idle, "Idle widget right-click did not open the tray menu");
+            trayMenu.Close();
+            Call(window, "StartPause");
+            Field<Border>(live, "button").RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
+                { RoutedEvent = UIElement.MouseRightButtonUpEvent });
+            Pump(50);
+            Check(countdown.State == TimerState.Idle && !trayMenu.Visible, "Running widget right-click did not cancel without opening the menu");
+            Call(window, "StartPause"); Call(window, "StartPause");
+            Check(countdown.State == TimerState.Paused, "Paused right-click check did not pause its timer");
+            Field<Border>(live, "button").RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
+                { RoutedEvent = UIElement.MouseRightButtonUpEvent });
+            Pump(50);
+            Check(countdown.State == TimerState.Idle && !trayMenu.Visible, "Paused widget right-click did not cancel without opening the menu");
             Console.WriteLine("CHECK: widget duration controls");
             Call(window, "SetMode", false); countdown.SetDuration(1800); Call(window, "UpdateView", false);
             Field<Border>(live, "button").RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, 120)

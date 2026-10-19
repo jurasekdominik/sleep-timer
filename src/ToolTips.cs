@@ -64,7 +64,7 @@ namespace SleepTimer
             }
             Row("Left-click", "Start / pause / resume");
             if (taskbar) Row("Double-click", "Open app");
-            Row("Right-click", "Cancel timer");
+            Row("Right-click", taskbar ? "Cancel timer / menu when idle" : "Cancel timer");
             Row("Scroll", "Adjust timer");
             if (taskbar) Row("Middle-click", "Open menu");
             panel.Children.Add(rows);
