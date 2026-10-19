@@ -35,6 +35,11 @@ namespace SleepTimer
         IntPtr nativeParent;
         uint nativeParentProcess;
         public string RendererDescription => native?.Ready == true ? "Native" : preferNative ? "WPF fallback" : "WPF";
+        public string RendererDetails => "Rendering: " + RendererDescription + "\n" +
+            (!NativeTaskbarHost.IsIncluded ? NativeTaskbarHost.MissingComponent
+            : native?.Failure ?? (native?.Starting == true ? "Native component is starting."
+            : preferNative && !nativeAttempted ? "Waiting for an available taskbar position."
+            : "Native attaches to the taskbar; WPF provides compatibility rendering."));
         readonly Stopwatch probeAge = new Stopwatch();
         readonly Stopwatch settleAge = new Stopwatch();
         Task<PixelRectangle?> probe;

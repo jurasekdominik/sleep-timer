@@ -46,7 +46,7 @@ Closing the window hides it to the tray. Double-click the tray icon to reopen it
 
 ## Build
 
-Install .NET SDK 8 and run `build.cmd`. It creates `SleepTimer.exe` in the project folder.
+Install .NET SDK 8 and run `build.cmd`. It creates `SleepTimer.exe` in the project folder. SDK-only builds use WPF taskbar rendering.
 
 To include the native taskbar timer, install Visual Studio C++ build tools, the Windows SDK and CMake, then run `build.cmd --native`. The portable executable includes the helper; users do not need those build tools. See [native taskbar development](docs/NATIVE_TASKBAR.md).
 

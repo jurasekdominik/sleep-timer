@@ -61,9 +61,14 @@ namespace SleepTimer
             string executable = NativeTaskbarHost.ExecutablePath();
             if (executable == null)
             {
+                using (var missing = new NativeTaskbarHost(IntPtr.Zero, IntPtr.Zero, () => { }, () => { }, () => { }, () => { }, () => { }, (delta, keys) => { }))
+                    Check(!missing.Start() && !string.IsNullOrEmpty(missing.Failure), "SDK-only build did not explain native unavailability");
                 Check(Environment.GetEnvironmentVariable("SLEEP_TIMER_NATIVE_REQUIRED") != "1", "Required native component was not embedded");
                 Console.WriteLine("SKIP: native host absent in SDK-only build"); return;
             }
+            Check(NativeTaskbarHost.IsIncluded, "Embedded native component is not offered as available");
+            using (var invalid = new NativeTaskbarHost(IntPtr.Zero, IntPtr.Zero, () => { }, () => { }, () => { }, () => { }, () => { }, (delta, keys) => { }))
+                Check(!invalid.Start() && invalid.Failure.Contains("window"), "Native startup failure did not explain invalid windows");
             var version = FileVersionInfo.GetVersionInfo(executable);
             Check(version.ProductName == "Sleep Timer" && version.FileDescription == "Sleep Timer - taskbar timer"
                 && version.FileVersion == typeof(Program).Assembly.GetName().Version.ToString(), "Native app branding/version differs from the main app");
@@ -135,6 +140,7 @@ namespace SleepTimer
                     Until(() => widget.RendererDescription == "WPF fallback" && widget.IsVisible, pump,
                         "A native helper failure did not restore WPF");
                     pump(300); Check(Field<bool>(widget, "nativeFailed"), "Failed native helper was automatically respawned");
+                    Check(widget.RendererDetails.Contains("exit code 0x"), "Native helper exit code was lost in the fallback details");
                 }
                 Console.WriteLine("CHECK: native taskbar parent-loss cleanup");
                 using (var widget = new TaskbarTimer(() => { }, () => { }, () => { }, (delta, keys) => { },

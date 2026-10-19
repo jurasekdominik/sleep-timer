@@ -3,4 +3,8 @@
   <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)native/bin/SleepTimer.Taskbar.exe')">
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)native/bin/SleepTimer.Taskbar.exe" LogicalName="SleepTimer.NativeTaskbar.exe" />
   </ItemGroup>
+  <Target Name="ReportMissingNativeTaskbar" BeforeTargets="CoreCompile"
+          Condition="'$(AssemblyName)' == 'SleepTimer' And !Exists('$(MSBuildThisFileDirectory)native/bin/SleepTimer.Taskbar.exe')">
+    <Message Importance="high" Text="Native taskbar component not included: this build uses WPF fallback. Run build.cmd --native to include it (requires Visual Studio C++ build tools, Windows SDK and CMake)." />
+  </Target>
 </Project>

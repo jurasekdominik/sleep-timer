@@ -16,6 +16,8 @@ namespace SleepTimer
     {
         internal const uint Magic = 0x53544e31, Version = 1;
         internal const int ReadyMessage = 0x8051, InputMessage = 0x8052;
+        internal const string MissingComponent = "Native component not included in this build. Rebuild with build.cmd --native, or use the portable release.";
+        internal static bool IsIncluded => Assembly.GetExecutingAssembly().GetManifestResourceInfo("SleepTimer.NativeTaskbar.exe") != null;
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         internal struct View
         {
@@ -63,17 +65,22 @@ namespace SleepTimer
             try
             {
                 string executable = ExecutablePath();
-                if (executable == null || !IsWindow(owner) || !IsWindow(Parent)) return false;
+                if (executable == null)
+                {
+                    Failure = Environment.Is64BitOperatingSystem ? MissingComponent : "Native rendering requires 64-bit Windows.";
+                    return false;
+                }
+                if (!IsWindow(owner) || !IsWindow(Parent)) { Failure = "The owner or taskbar window is unavailable."; return false; }
                 process = new Process { StartInfo = new ProcessStartInfo(executable,
                     owner.ToInt64().ToString("X") + " " + Parent.ToInt64().ToString("X")) { UseShellExecute = false, CreateNoWindow = true } };
                 process.Exited += OnExited;
-                if (!process.Start()) return false;
+                if (!process.Start()) { Failure = "Windows did not start the native component."; return false; }
                 process.EnableRaisingEvents = true;
                 startup.Start(); return true;
             }
             catch (Exception error) when (error is IOException || error is UnauthorizedAccessException || error is Win32Exception
                 || error is InvalidOperationException || error is NotSupportedException)
-            { Failure = error.Message; return false; }
+            { Failure = error is Win32Exception nativeError ? "Windows error " + nativeError.NativeErrorCode + ": " + error.Message : error.Message; return false; }
         }
 
         public bool HandleMessage(int message, IntPtr sender, IntPtr encoded)
@@ -162,7 +169,15 @@ namespace SleepTimer
         void OnExited(object sender, EventArgs e)
         {
             if (disposed || dispatcher.HasShutdownStarted) return;
-            try { dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() => { if (!disposed) Fail("Native taskbar exited"); })); }
+            try { dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)(() =>
+            {
+                if (disposed) return;
+                string reason = "Native taskbar exited";
+                try { reason += " (exit code 0x" + process.ExitCode.ToString("X8") + ")"; }
+                catch (InvalidOperationException) { }
+                catch (Win32Exception) { }
+                Fail(reason);
+            })); }
             catch (InvalidOperationException) { } // Dispatcher shut down between the check and the post.
         }
         void Fail(string reason)

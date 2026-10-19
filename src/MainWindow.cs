@@ -283,14 +283,17 @@ namespace SleepTimer
             SwitchRow(general, "Force close apps", "Skips “save changes?” prompts (/f)", forceSwitch, 60);
             taskbarRenderer.Style = (Style)FindResource("TextButton");
             taskbarRenderer.Content = Settings.Get("native_taskbar", true) ? "Native ▾" : "Compatible (WPF) ▾";
-            taskbarRenderer.ToolTip = "Native: attached to the taskbar\nWPF: compatibility fallback";
+            taskbarRenderer.ToolTip = NativeTaskbarHost.IsIncluded ? "Native: attached to the taskbar\nWPF: compatibility fallback" : NativeTaskbarHost.MissingComponent;
+            taskbarRenderer.MouseEnter += (s, e) => taskbarRenderer.ToolTip = taskbarTimer?.RendererDetails
+                ?? (NativeTaskbarHost.IsIncluded ? "Native: attached to the taskbar\nWPF: compatibility fallback" : NativeTaskbarHost.MissingComponent);
             taskbarRenderer.Click += (s, e) =>
             {
                 if (rendererMenu.Visible || rendererMenu.JustClosed) return;
                 bool selected = Settings.Get("native_taskbar", true);
                 rendererMenu.Show(new[] {
                     new MenuRow { Text = taskbarTimer == null ? "Rendering" : "Rendering: " + taskbarTimer.RendererDescription, Header = true },
-                    new MenuRow { Text = "Native", Selected = selected, Click = () => SetTaskbarRenderer(true) },
+                    new MenuRow { Text = NativeTaskbarHost.IsIncluded ? "Native" : "Native (not included)",
+                        Enabled = NativeTaskbarHost.IsIncluded && Environment.Is64BitOperatingSystem, Selected = selected, Click = () => SetTaskbarRenderer(true) },
                     new MenuRow { Text = "Compatible (WPF)", Selected = !selected, Click = () => SetTaskbarRenderer(false) }
                 }, taskbarRenderer);
             };
