@@ -392,6 +392,7 @@ namespace SleepTimer
                 { RoutedEvent = UIElement.MouseWheelEvent });
             Check(countdown.Duration == 2100, "Widget scrolling did not add five minutes in duration mode");
             countdown.SetDuration(1800); Call(window, "UpdateView", false);
+            NativeChecks.CheckMenuDismissal(window, live, Pump);
             Call(window, "SetTaskbarTimer", false);
             Check(!Settings.Get("taskbar_timer", true) && Field<TaskbarTimer>(window, "taskbarTimer") == null,
                 "Disabling mini timer failed to save or dispose it");
@@ -528,6 +529,7 @@ namespace SleepTimer
 
         [STAThread] static int Main(string[] args)
         {
+            if (args.Length == 2 && args[0] == "--menu-peer") return NativeChecks.MenuPeer(args[1]);
             if (args.Length == 3 && args[0] == "--native-owner-test")
                 return NativeChecks.OwnerExitProbe(args[1], new IntPtr(long.Parse(args[2], System.Globalization.NumberStyles.HexNumber)), Pump);
             // Preserve the caller's settings. No expiry polling or power action runs in this suite.

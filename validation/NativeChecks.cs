@@ -24,6 +24,19 @@ namespace SleepTimer
         [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Native.ScreenPoint point);
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+        [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, MouseInput[] inputs, int size);
+        [StructLayout(LayoutKind.Sequential)] struct MouseInput
+        {
+            public uint Type;
+            public MouseData Mouse;
+        }
+        [StructLayout(LayoutKind.Sequential)] struct MouseData
+        {
+            public int X, Y;
+            public uint Data, Flags, Time;
+            public UIntPtr Extra;
+        }
         [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
         static T Field<T>(object instance, string name) => (T)instance.GetType().GetField(name, Fields).GetValue(instance);
         static void Check(bool okay, string message) { if (!okay) throw new Exception(message); }
@@ -39,6 +52,91 @@ namespace SleepTimer
         {
             try { using (var process = Process.GetProcessById(id)) return process.HasExited; }
             catch (ArgumentException) { return true; }
+        }
+
+        internal static int MenuPeer(string report)
+        {
+            var area = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
+            using (var form = new System.Windows.Forms.Form { Text = "Menu dismissal test peer", ShowInTaskbar = false,
+                StartPosition = System.Windows.Forms.FormStartPosition.Manual, Location = new Point(area.Right - 300, area.Top + 40), Size = new Size(280, 180) })
+            {
+                form.Shown += (s, e) => File.WriteAllText(report, form.Handle.ToInt64().ToString("X"));
+                System.Windows.Forms.Application.Run(form);
+            }
+            return 0;
+        }
+
+        static void Click(int x, int y, uint down = 2, uint up = 4)
+        {
+            Check(SetCursorPos(x, y), "Could not position the pointer for native menu input");
+            var input = new[] { new MouseInput { Mouse = new MouseData { Flags = down } }, new MouseInput { Mouse = new MouseData { Flags = up } } };
+            Check(SendInput(2, input, Marshal.SizeOf(typeof(MouseInput))) == 2, "Native menu mouse input was not delivered");
+        }
+
+        internal static void CheckMenuDismissal(MainWindow app, TaskbarTimer callbacks, Action<int> pump)
+        {
+            if (!NativeTaskbarHost.IsIncluded) return;
+            Console.WriteLine("CHECK: native menu activation and real outside-click dismissal");
+            var area = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
+            var target = new Rectangle(area.Left + 80, area.Bottom - 84, 140, 34);
+            var parent = CreateWindowEx(0, "STATIC", "Native menu test surface", 0x92000004,
+                area.Left + 64, area.Bottom - 100, 420, 80, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+            Check(parent != IntPtr.Zero, "Could not create native menu parent");
+            string report = Path.Combine(Path.GetTempPath(), "sleep-timer-menu-" + Guid.NewGuid().ToString("N") + ".txt");
+            var menu = Field<PopupMenu>(app, "trayMenu");
+            bool visible = app.IsVisible;
+            Native.GetPhysicalCursorPos(out var pointer);
+            try
+            {
+                using (var peer = Process.Start(new ProcessStartInfo(Assembly.GetExecutingAssembly().Location,
+                    "--menu-peer \"" + report + "\"") { UseShellExecute = false, CreateNoWindow = true }))
+                using (var widget = new TaskbarTimer(Field<Action>(callbacks, "toggle"), Field<Action>(callbacks, "cancel"),
+                    Field<Action>(callbacks, "menu"), Field<Action<int, ModifierKeys>>(callbacks, "scroll"),
+                    (width, height) => target, bounds => true, Field<Action>(callbacks, "open"), preferNative: true, nativeParent: parent))
+                {
+                    try
+                    {
+                        Until(() => File.Exists(report), pump, "Menu test peer did not start");
+                        var other = new IntPtr(long.Parse(File.ReadAllText(report), System.Globalization.NumberStyles.HexNumber));
+                        widget.Update("1:00:00", "Sleep", TimerState.Idle, 1, TimerTone.Idle);
+                        Until(() => widget.RendererDescription == "Native", pump, "Menu test native component did not attach");
+                        app.Hide();
+                        int x = target.Left + target.Width / 2, y = target.Top + target.Height / 2;
+                        foreach (bool middle in new[] { false, true })
+                        {
+                            pump(200); // A new gesture after the menu's normal close cooldown.
+                            Click(area.Right - 160, area.Top + 120);
+                            Until(() => GetForegroundWindow() == other, pump, "The other process did not receive foreground input");
+                            Click(x, y, middle ? 0x20u : 8u, middle ? 0x40u : 16u);
+                            Until(() => menu.Visible, pump, "Native widget did not open the menu");
+                            var source = (HwndSource)System.Windows.PresentationSource.FromVisual(Field<System.Windows.Controls.Border>(menu, "border"));
+                            Until(() => GetForegroundWindow() == source.Handle, pump, "Native menu did not activate its popup", 1000);
+                            Check(!app.IsVisible, "Native menu made the main window visible");
+                            if (!middle)
+                            {
+                                Click(x, y, 8, 16);
+                                Until(() => !menu.Visible, pump, "Second native right-click did not dismiss the menu");
+                                pump(250); Check(!menu.Visible, "Native right-click reopened the menu after dismissing it");
+                                Click(x, y, 8, 16);
+                                Until(() => menu.Visible, pump, "A fresh native right-click could not reopen the menu");
+                            }
+                            Click(area.Right - 160, area.Top + 120);
+                            Until(() => !menu.Visible, pump, "An outside click in another process did not dismiss the native menu");
+                            Check(GetForegroundWindow() == other, "Dismissing the native menu stole focus from the clicked app");
+                        }
+                    }
+                    finally
+                    {
+                        menu.Close();
+                        if (!peer.HasExited) { peer.CloseMainWindow(); if (!peer.WaitForExit(1000)) peer.Kill(); }
+                    }
+                }
+            }
+            finally
+            {
+                DestroyWindow(parent); File.Delete(report); SetCursorPos(pointer.X, pointer.Y);
+                if (visible) app.ShowWindow();
+            }
         }
 
         internal static int OwnerExitProbe(string output, IntPtr parent, Action<int> pump)
