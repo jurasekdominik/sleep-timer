@@ -641,7 +641,7 @@ namespace SleepTimer
             if (taskbarTimer == null)
                 taskbarTimer = new TaskbarTimer(StartPause, () =>
                 {
-                    if (countdown.State != TimerState.Idle) Cancel();
+                    if (countdown.State != TimerState.Idle) { trayMenu.Close(); Cancel(); }
                     else Dispatcher.BeginInvoke(DispatcherPriority.Input, (Action)ShowTaskbarMenu);
                 }, ShowTaskbarMenu, face.Scroll, open: ShowWindow, preferNative: Settings.Get("native_taskbar", true));
             UpdateView();
@@ -649,6 +649,8 @@ namespace SleepTimer
         void ShowTaskbarMenu()
         {
             if (disposed) return;
+            // The popup may close on mouse-down before the helper forwards mouse-up.
+            if (trayMenu.Visible || trayMenu.JustClosed) { trayMenu.Close(); return; }
             ToolTips.Dismiss();
             Native.GetPhysicalCursorPos(out var point);
             trayClick = new Point(point.X, point.Y); ShowTrayMenu();

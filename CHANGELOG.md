@@ -6,6 +6,7 @@
 - Formatted tooltips that hide while clicking, scrolling or typing.
 - Clearer messages when a local build is missing the native helper.
 - Faster widget clicks; right-click opens the menu when idle.
+- Widget menus close on outside clicks or another right-click.
 - Less font loading at startup.
 
 Taskbar integration inspired by [TaskbarWidgets](https://github.com/pfcdev/TaskbarWidgets).

@@ -374,8 +374,13 @@ namespace SleepTimer
             Check(!trayMenu.Visible, "Idle right-click opened the menu before releasing capture");
             Pump(50);
             Check(trayMenu.Visible && countdown.State == TimerState.Idle, "Idle widget right-click did not open the tray menu");
-            trayMenu.Close();
+            Field<Border>(live, "button").RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
+                { RoutedEvent = UIElement.MouseRightButtonUpEvent });
+            Pump(250);
+            Check(!trayMenu.Visible, "Repeated idle right-click did not dismiss the widget menu");
             Call(window, "StartPause");
+            Call(window, "ShowTaskbarMenu"); Pump(50);
+            Check(trayMenu.Visible, "Active timer menu could not open before testing cancellation");
             Field<Border>(live, "button").RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
                 { RoutedEvent = UIElement.MouseRightButtonUpEvent });
             Pump(50);

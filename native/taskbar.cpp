@@ -130,6 +130,7 @@ struct Renderer {
 
 struct Host {
     HWND owner = nullptr, parent = nullptr, window = nullptr;
+    DWORD ownerProcess = 0;
     Renderer renderer;
     View previous{};
     bool hasView = false, suppressRelease = false, clickPending = false;
@@ -138,6 +139,9 @@ struct Host {
     void input(taskbar::Command command, short delta = 0) noexcept {
         KillTimer(window, taskbar::clickTimer);
         clickPending = false;
+        // This process received the click; let WPF activate the menu or app on its behalf.
+        if (command == taskbar::Command::menu || command == taskbar::Command::cancel || command == taskbar::Command::open)
+            AllowSetForegroundWindow(ownerProcess);
         unsigned modifiers = ((GetAsyncKeyState(VK_MENU) & 0x8000) ? 1u : 0u)
             | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? 2u : 0u) | ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? 4u : 0u);
         auto encoded = static_cast<std::uint32_t>(command) | (modifiers << 8)
@@ -264,7 +268,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // Match Explorer's awareness before creating a window. WPF's DPI context is never modified.
     auto context = GetWindowDpiAwarenessContext(parent);
     if (!context || !SetThreadDpiAwarenessContext(context)) { CloseHandle(alive); return 5; }
-    Host host; host.owner = owner; host.parent = parent;
+    Host host; host.owner = owner; host.parent = parent; host.ownerProcess = ownerProcess;
     if (!host.renderer.init()) { CloseHandle(alive); return 6; }
     WNDCLASSW type{};
     type.style = CS_DBLCLKS; type.lpfnWndProc = windowProcedure; type.hInstance = instance;
