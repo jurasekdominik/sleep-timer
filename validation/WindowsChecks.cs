@@ -304,7 +304,7 @@ namespace SleepTimer
                     { RoutedEvent = UIElement.MouseWheelEvent });
                 Check(wheel == 120, "Mini timer did not forward scrolling");
                 mini.Update("2:24:59", "Sleep", TimerState.Paused, .4, TimerTone.Paused);
-                Check(Field<TextBlock>(mini, "time").Text == "2:24:59" && button.ToolTip.ToString().Contains("Paused"),
+                Check(Field<TextBlock>(mini, "time").Text == "2:24:59" && Field<TextBlock>(mini, "tipHeading").Text.Contains("Paused"),
                     "Paused mini timer is stale or missing state");
                 System.Threading.Volatile.Write(ref suppressed, 1); Call(mini, "QueueForegroundRefresh"); Pump(500);
                 Check(!mini.IsVisible, "Mini timer must hide when taskbar placement is unavailable");
@@ -780,10 +780,31 @@ namespace SleepTimer
                         awake.Close(); Pump(200);
                         awake.Show((System.Collections.Generic.List<MenuRow>)Call(visual, "ChipRows"), anchor);
                         Pump(200); CaptureControl((FrameworkElement)Field<Popup>(awake, "popup").Child, "wpf-awake-menu"); awake.Close(); Pump(200);
-                        var tooltip = new ToolTip { Content = "Click to start or pause", PlacementTarget = Field<TimerFace>(visual, "face") };
+                        var tooltip = (ToolTip)Field<TimerFace>(visual, "face").ToolTip;
+                        tooltip.PlacementTarget = Field<TimerFace>(visual, "face");
+                        Pump(650);
                         tooltip.IsOpen = true; Pump(100);
                         Check(((SolidColorBrush)tooltip.Background).Color == Theme.Surface && ((SolidColorBrush)tooltip.Foreground).Color == Theme.Text, "Tooltip does not use the app theme");
-                        CaptureControl(tooltip, "wpf-tooltip"); tooltip.IsOpen = false;
+                        CaptureControl(tooltip, "wpf-tooltip");
+                        Check(ToolTipService.GetShowDuration(tooltip.PlacementTarget) == int.MaxValue,
+                            "Tooltip must remain visible during an uninterrupted hover");
+                        InputManager.Current.ProcessInput(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, 120)
+                            { RoutedEvent = Mouse.PreviewMouseWheelEvent });
+                        Check(!tooltip.IsOpen, "Scrolling did not dismiss the tooltip before controls handled the input");
+                        tooltip.IsOpen = true; Pump(30);
+                        Check(!tooltip.IsOpen, "Tooltip reappeared during active input");
+                        Pump(650);
+                        tooltip.IsOpen = true; Pump(30);
+                        InputManager.Current.ProcessInput(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+                            { RoutedEvent = Mouse.PreviewMouseDownEvent });
+                        Check(!tooltip.IsOpen, "Mouse input did not dismiss the tooltip");
+                        Pump(650);
+                        tooltip.IsOpen = true; Pump(30);
+                        InputManager.Current.ProcessInput(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(visual),
+                            Environment.TickCount, Key.F6) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+                        Check(!tooltip.IsOpen, "Keyboard input did not dismiss the tooltip");
+                        Pump(650); tooltip.IsOpen = true; Pump(30); Call(visual, "AddTime", 60);
+                        Check(!tooltip.IsOpen, "Timer adjustment outside mouse routing left the tooltip open");
                         Call(visual, "ToggleSettings"); Call(visual, "SelectTab", 3); Pump(300);
                         Capture(visual, "wpf-keybinds");
                         Check(Field<TextBox[]>(visual, "shortcutFields").All(input => input.Text == "Unbound"), "Keybinds are not unbound by default");

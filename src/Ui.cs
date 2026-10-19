@@ -45,6 +45,7 @@ namespace SleepTimer
 
         public static void Init(Application app)
         {
+            ToolTips.Init();
             AppFonts.Timer = AppFonts.Select(Settings.Get("timer_font", "segoe"), false, Settings.Get("timer_font_weight", -1));
             AppFonts.Ui = AppFonts.Select(Settings.Get("ui_font", "segoe"), true, Settings.Get("ui_font_weight", -1));
             string saved = Settings.Get("accent", DefaultAccent);
@@ -77,11 +78,11 @@ namespace SleepTimer
   <Setter Property='Background' Value='{DynamicResource SurfaceBrush}'/>
   <Setter Property='Foreground' Value='{DynamicResource TextBrush}'/>
   <Setter Property='BorderBrush' Value='{DynamicResource BorderBrush}'/>
-  <Setter Property='FontFamily' Value='{DynamicResource UiFontFamily}'/><Setter Property='FontWeight' Value='{DynamicResource UiFontWeight}'/><Setter Property='FontSize' Value='12'/>
+  <Setter Property='FontFamily' Value='{DynamicResource UiFontFamily}'/><Setter Property='FontWeight' Value='Normal'/><Setter Property='FontSize' Value='12'/>
   <Setter Property='Padding' Value='10,7'/><Setter Property='HasDropShadow' Value='False'/>
   <Setter Property='UseLayoutRounding' Value='True'/><Setter Property='SnapsToDevicePixels' Value='True'/>
   <Setter Property='ContentTemplate'><Setter.Value><DataTemplate>
-   <TextBlock Text='{Binding}' TextWrapping='Wrap' MaxWidth='300'/>
+   <TextBlock Text='{Binding}' TextWrapping='Wrap' MaxWidth='300' FontWeight='Normal'/>
   </DataTemplate></Setter.Value></Setter>
   <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ToolTip'>
    <Border Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}'
@@ -326,7 +327,7 @@ namespace SleepTimer
         public TimerFace()
         {
             Width = 320; Height = 328; Focusable = false;
-            ToolTip = "Click to start or pause · Right-click to cancel · Scroll to adjust";
+            ToolTip = ToolTips.TimerControls(new TextBlock { Text = "Timer controls" });
             MouseMove += (s, e) => { bool next = InRing(e.GetPosition(this)); if (hot != next) { hot = next; Cursor = hot ? Cursors.Hand : Cursors.Arrow; InvalidateVisual(); } };
             MouseLeave += (s, e) => { hot = false; InvalidateVisual(); };
             MouseDown += (s, e) =>

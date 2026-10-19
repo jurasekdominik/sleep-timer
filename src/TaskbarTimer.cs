@@ -15,6 +15,7 @@ namespace SleepTimer
     sealed class TaskbarTimer : Window, IDisposable
     {
         readonly Border button;
+        readonly TextBlock tipHeading = new TextBlock();
         readonly TextBlock time = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 12, FontWeight = FontWeights.SemiBold,
             TextAlignment = TextAlignment.Right, TextTrimming = TextTrimming.CharacterEllipsis };
         readonly TextBlock action = new TextBlock { FontFamily = new FontFamily("Segoe UI"), FontSize = 11, FontWeight = FontWeights.Normal,
@@ -88,6 +89,7 @@ namespace SleepTimer
             // Alpha 1 looks transparent while preserving native hit testing over the entire rectangle.
             button = new Border { Child = content, Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)),
                 Padding = new Thickness(5, 0, 5, 0), Cursor = Cursors.Hand };
+            button.ToolTip = ToolTips.TimerControls(tipHeading, taskbar: true);
             time.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
             action.SetResourceReference(TextBlock.ForegroundProperty, "SecondBrush");
             Content = button;
@@ -312,8 +314,7 @@ namespace SleepTimer
             time.Text = value;
             time.SetResourceReference(TextBlock.ForegroundProperty, state == TimerState.Idle ? "SecondBrush" : "TextBrush");
             action.Text = actionLabel + (state == TimerState.Idle ? " · Ready" : state == TimerState.Paused ? " · Paused" : "");
-            button.ToolTip = value + " · " + actionLabel + " · " + (state == TimerState.Idle ? "Ready" : state.ToString())
-                + "\nClick to start or pause · Double-click to open · Right-click to cancel · Scroll to adjust · Middle-click for menu";
+            tipHeading.Text = value + " · " + actionLabel + " · " + (state == TimerState.Idle ? "Ready" : state.ToString());
             ring.Fraction = fraction; ring.State = state; ring.Tone = tone; ring.InvalidateVisual();
             if (native?.Ready == true) SyncNative(!waitingForLayout && previous.HasValue && canEmbed(previous.Value));
         }

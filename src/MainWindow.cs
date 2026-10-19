@@ -36,7 +36,7 @@ namespace SleepTimer
             Padding = new Thickness(0), Width = 30, Height = 30, ToolTip = "Fonts", Visibility = Visibility.Collapsed };
         readonly ActionSelector picker = new ActionSelector();
         readonly ModeSelector modeSelector = new ModeSelector();
-        readonly TextBox clockField = new TextBox { MaxLength = 5, Width = 101.333333, Height = 32, TextAlignment = TextAlignment.Center, ToolTip = "24-hour time, HH:mm. Scroll hours or minutes; arrow keys adjust." };
+        readonly TextBox clockField = new TextBox { MaxLength = 5, Width = 101.333333, Height = 32, TextAlignment = TextAlignment.Center, ToolTip = "24-hour time · HH:mm\nScroll hours or minutes\nArrow keys to adjust" };
         readonly Button awakeChip = new Button { Width = 160, Height = 32 };
         readonly ToggleButton awakeSwitch = new ToggleButton();
         readonly ToggleButton startupSwitch = new ToggleButton { IsChecked = Settings.Get("start_with_windows", false) };
@@ -51,7 +51,7 @@ namespace SleepTimer
         readonly TextBlock hourStopHelp = new TextBlock { FontSize = 12, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         readonly TextBlock animationNote = new TextBlock { FontSize = 12, Foreground = Theme.Brush(Theme.Faint) };
         readonly TextBlock accentNote = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap };
-        readonly TextBox quickMinutes = new TextBox { MaxLength = 32, Width = 184, Tag = "Minutes or hours", ToolTip = "Whole minutes (60, 90) or whole hours (2h, 5h). Up to 24 hours." };
+        readonly TextBox quickMinutes = new TextBox { MaxLength = 32, Width = 184, Tag = "Minutes or hours", ToolTip = "Whole minutes: 60, 90\nWhole hours: 2h, 5h\nMaximum: 24 hours" };
         readonly TextBlock quickNote = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap };
         readonly StackPanel customRows = new StackPanel();
         readonly ScrollViewer customScroll = new ThemedScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
@@ -283,7 +283,7 @@ namespace SleepTimer
             SwitchRow(general, "Force close apps", "Skips “save changes?” prompts (/f)", forceSwitch, 60);
             taskbarRenderer.Style = (Style)FindResource("TextButton");
             taskbarRenderer.Content = Settings.Get("native_taskbar", true) ? "Native ▾" : "Compatible (WPF) ▾";
-            taskbarRenderer.ToolTip = "Choose taskbar rendering. Native attaches to the taskbar; WPF provides a compatibility fallback.";
+            taskbarRenderer.ToolTip = "Native: attached to the taskbar\nWPF: compatibility fallback";
             taskbarRenderer.Click += (s, e) =>
             {
                 if (rendererMenu.Visible || rendererMenu.JustClosed) return;
@@ -368,7 +368,7 @@ namespace SleepTimer
                 int index = i;
                 Shortcut.TryCreate(Settings.Get(ShortcutNames[i] + "_modifiers", 0), Settings.Get(ShortcutNames[i] + "_key", 0), out shortcuts[i]);
                 var input = new TextBox { Width = 280, Height = 32, IsReadOnly = true, IsReadOnlyCaretVisible = false,
-                    Text = ShortcutText(shortcuts[i]), ToolTip = "Click, then press a key with Ctrl, Alt or Win. Delete to unbind; Escape to keep the current binding." };
+                    Text = ShortcutText(shortcuts[i]), ToolTip = "Click, then press a key with Ctrl, Alt or Win\nDelete: clear binding\nEscape: keep current binding" };
                 shortcutFields[i] = input;
                 Place(panel, Label(labels[i], 12, true), 20, 76 + i * 68, 280, 20);
                 Place(panel, input, 20, 100 + i * 68);
@@ -493,7 +493,7 @@ namespace SleepTimer
             row.Children.Add(Label(label));
             input.Text = TimingValue(kind).ToString(CultureInfo.InvariantCulture);
             input.Height = 32;
-            input.ToolTip = "0–10000 milliseconds. Default: " + (kind == 2 ? "400" : "600") + " ms. Press Enter or leave the field to save.";
+            input.ToolTip = "0–10000 milliseconds\nDefault: " + (kind == 2 ? "400" : "600") + " ms\nEnter or leave the field to save";
             Grid.SetColumn(input, 1); row.Children.Add(input);
             var unit = Label("ms", 12, true); unit.Margin = new Thickness(8, 0, 0, 0);
             Grid.SetColumn(unit, 2); row.Children.Add(unit);
@@ -686,6 +686,7 @@ namespace SleepTimer
         void EditClock(int delta)
         {
             if (!clockField.IsEnabled) return;
+            ToolTips.Dismiss();
             clockMinute = ((clockMinute + delta) % 1440 + 1440) % 1440; clockTouched = true;
             clockField.Text = TimeText.HourMinute(clockMinute); UpdateView(true);
         }
@@ -698,6 +699,7 @@ namespace SleepTimer
         void AddTime(int delta)
         {
             if (executing) return;
+            ToolTips.Dismiss();
             double current = clockMode && countdown.TargetTime.HasValue
                 ? TimeZoneInfo.ConvertTime(countdown.TargetTime.Value, TimeZoneInfo.Local).TimeOfDay.TotalSeconds
                 : countdown.State == TimerState.Idle ? clockMode ? clockMinute * 60 : countdown.Duration : countdown.Remaining;
@@ -728,6 +730,7 @@ namespace SleepTimer
         void StartPause()
         {
             if (executing) return;
+            ToolTips.Dismiss();
             hourStop.Reset(); SaveDuration();
             switch (countdown.State)
             {
@@ -753,11 +756,13 @@ namespace SleepTimer
         void Cancel()
         {
             if (executing) return;
+            ToolTips.Dismiss();
             hourStop.Reset(); countdown.Reset(); ApplyAwake(); UpdateView(true);
         }
         void StartQuickTimer(int minutes)
         {
             if (executing) return;
+            ToolTips.Dismiss();
             hourStop.Reset(); durationDirty = false; countdown.Reset(); action = quickAction;
             Settings.Set("action", action.Key);
             countdown.SetDuration(minutes * 60); lastQuickMinutes = minutes;
