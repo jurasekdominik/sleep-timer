@@ -34,25 +34,32 @@ namespace SleepTimer
 
     static class AppFonts
     {
-        static readonly HashSet<string> installed = new HashSet<string>(
-            Fonts.SystemFontFamilies.Select(font => font.Source), StringComparer.OrdinalIgnoreCase);
-        public static readonly AppFont[] All = new[] {
-            ("segoe", "Segoe UI", true), ("aptos", "Aptos", true),
-            ("calibri", "Calibri", true), ("corbel", "Corbel", true),
-            ("tahoma", "Tahoma", true), ("arial", "Arial", true), ("verdana", "Verdana", true),
-            ("bahnschrift", "Bahnschrift", false), ("consolas", "Consolas", false),
-            ("cascadia-mono", "Cascadia Mono", false)
-        }.Where(font => font.Item1 == "segoe" || installed.Contains(font.Item2))
-            .Select(font => new AppFont(font.Item1, font.Item2, font.Item3)).ToArray();
+        static readonly AppFont segoe = new AppFont("segoe", "Segoe UI");
+        // Default startup needs one family; enumerate the font catalog only when requested.
+        static readonly Lazy<AppFont[]> catalog = new Lazy<AppFont[]>(LoadChoices);
+        public static AppFont[] All => catalog.Value;
+        static AppFont[] LoadChoices()
+        {
+            var installed = new HashSet<string>(Fonts.SystemFontFamilies.Select(font => font.Source), StringComparer.OrdinalIgnoreCase);
+            return new[] {
+                ("segoe", "Segoe UI", true), ("aptos", "Aptos", true),
+                ("calibri", "Calibri", true), ("corbel", "Corbel", true),
+                ("tahoma", "Tahoma", true), ("arial", "Arial", true), ("verdana", "Verdana", true),
+                ("bahnschrift", "Bahnschrift", false), ("consolas", "Consolas", false),
+                ("cascadia-mono", "Cascadia Mono", false)
+            }.Where(font => font.Item1 == "segoe" || installed.Contains(font.Item2))
+                .Select(font => font.Item1 == "segoe" ? segoe : new AppFont(font.Item1, font.Item2, font.Item3)).ToArray();
+        }
         public static IEnumerable<AppFont> Choices(bool ui) => All.Where(font => !ui || font.ForUi);
-        public static AppFont Timer = All[0], Ui = All[0];
-        public static AppFont Find(string key) => All.FirstOrDefault(font => font.Key == key) ?? All[0];
+        public static AppFont Timer = segoe, Ui = segoe;
+        public static AppFont Find(string key) => key == "segoe" || key == "light" || key == "semilight" || key == "semibold"
+            ? segoe : All.FirstOrDefault(font => font.Key == key) ?? segoe;
         public static AppFont Select(string key, bool ui, int weight)
         {
             // Migrate the old separate Segoe weight presets without losing the selection.
             if (weight == -1) weight = key == "light" ? 300 : key == "semilight" ? 350 : key == "semibold" ? 600 : 400;
             var font = Find(key);
-            if (ui && !font.ForUi) font = All[0];
+            if (ui && !font.ForUi) font = segoe;
             return font.WithWeight(weight);
         }
     }

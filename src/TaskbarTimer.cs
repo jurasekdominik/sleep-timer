@@ -101,7 +101,8 @@ namespace SleepTimer
             leftClick.Tick += (s, e) => { leftClick.Stop(); if (!disposed) toggle(); };
             button.MouseLeftButtonDown += (s, e) =>
             {
-                suppressLeftRelease = e.ClickCount > 1;
+                // A slow Windows double-click becomes two single clicks after our shorter wait.
+                suppressLeftRelease = e.ClickCount > 1 && leftClick.IsEnabled;
                 if (suppressLeftRelease) { leftClick.Stop(); open?.Invoke(); }
                 e.Handled = true;
             };
@@ -110,7 +111,7 @@ namespace SleepTimer
                 if (!suppressLeftRelease)
                 {
                     leftClick.Stop();
-                    leftClick.Interval = TimeSpan.FromMilliseconds(System.Windows.Forms.SystemInformation.DoubleClickTime);
+                    leftClick.Interval = TimeSpan.FromMilliseconds(Math.Min(250, System.Windows.Forms.SystemInformation.DoubleClickTime));
                     leftClick.Start();
                 }
                 suppressLeftRelease = false; e.Handled = true;

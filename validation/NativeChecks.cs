@@ -105,7 +105,7 @@ namespace SleepTimer
 
                     var foreground = GetForegroundWindow();
                     SendMessage(child, 0x0202, IntPtr.Zero, IntPtr.Zero); // WM_LBUTTONUP
-                    pump(System.Windows.Forms.SystemInformation.DoubleClickTime + 80);
+                    Until(() => toggled == 1, pump, "Native single-click exceeded the shorter wait", 450);
                     Check(toggled == 1 && GetForegroundWindow() == foreground, "Native single-click toggled incorrectly or took focus");
                     SendMessage(child, 0x0202, IntPtr.Zero, IntPtr.Zero);
                     SendMessage(child, 0x0203, IntPtr.Zero, IntPtr.Zero); // WM_LBUTTONDBLCLK
@@ -113,9 +113,15 @@ namespace SleepTimer
                     pump(System.Windows.Forms.SystemInformation.DoubleClickTime + 80);
                     Check(opened == 1 && toggled == 1, "Native double-click changed the countdown");
                     SendMessage(child, 0x0202, IntPtr.Zero, IntPtr.Zero);
+                    Until(() => toggled == 2, pump, "First slow native click did not toggle", 450);
+                    SendMessage(child, 0x0203, IntPtr.Zero, IntPtr.Zero);
+                    SendMessage(child, 0x0202, IntPtr.Zero, IntPtr.Zero);
+                    Until(() => toggled == 3, pump, "Slow native double-click lost its second single-click", 450);
+                    Check(opened == 1, "Slow native double-click opened the app after toggling");
+                    SendMessage(child, 0x0202, IntPtr.Zero, IntPtr.Zero);
                     SendMessage(child, 0x0205, IntPtr.Zero, IntPtr.Zero); // WM_RBUTTONUP
                     pump(System.Windows.Forms.SystemInformation.DoubleClickTime + 80);
-                    Check(cancelled == 1 && toggled == 1, "Native cancel did not clear a pending single-click");
+                    Check(cancelled == 1 && toggled == 3, "Native cancel did not clear a pending single-click");
                     SendMessage(child, 0x0208, IntPtr.Zero, IntPtr.Zero); pump(50);
                     Check(menus == 1, "Native middle-click did not open the menu");
                     SendMessage(child, 0x020A, new IntPtr(120 << 16), IntPtr.Zero); pump(50);

@@ -288,10 +288,14 @@ namespace SleepTimer
                 Console.WriteLine("CHECK: widget pointer controls");
                 LeftClick(button);
                 Check(toggled == 0, "Single click must allow time for a double-click");
-                PumpUntil(() => toggled == 1, System.Windows.Forms.SystemInformation.DoubleClickTime + 1000, "Single click did not toggle the timer");
+                Check(Field<DispatcherTimer>(mini, "leftClick").Interval.TotalMilliseconds <= 250, "Widget single-click wait exceeds 250 ms");
+                PumpUntil(() => toggled == 1, 450, "Single click did not toggle within the shorter wait");
                 LeftClick(button); LeftClick(button, 2);
                 Pump(System.Windows.Forms.SystemInformation.DoubleClickTime + 50);
                 Check(opened == 1 && toggled == 1, "Double-click must open the app without toggling its timer");
+                LeftClick(button); PumpUntil(() => toggled == 2, 450, "First slow click did not toggle");
+                LeftClick(button, 2); PumpUntil(() => toggled == 3, 450, "Slow double-click lost its second single-click");
+                Check(opened == 1, "A slow double-click opened the app after already toggling");
                 LeftClick(button);
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
                     { RoutedEvent = UIElement.MouseRightButtonUpEvent });
@@ -299,7 +303,7 @@ namespace SleepTimer
                 button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Middle)
                     { RoutedEvent = UIElement.MouseUpEvent });
                 Check(menus == 0, "Widget menu opened inside the mouse event"); Pump(30);
-                Check(toggled == 1 && menus == 1, "Mini timer click actions were not dispatched once");
+                Check(toggled == 3 && menus == 1, "Mini timer click actions were not dispatched once");
                 button.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, 120)
                     { RoutedEvent = UIElement.MouseWheelEvent });
                 Check(wheel == 120, "Mini timer did not forward scrolling");
@@ -313,7 +317,7 @@ namespace SleepTimer
                 LeftClick(button);
                 mini.Dispose();
                 Pump(System.Windows.Forms.SystemInformation.DoubleClickTime + 50);
-                Check(toggled == 1, "A pending click survived disposal or cancellation");
+                Check(toggled == 3, "A pending click survived disposal or cancellation");
                 foregroundEvent.DynamicInvoke(IntPtr.Zero, (uint)3, IntPtr.Zero, 0, 0, (uint)0, (uint)0);
                 Check(!Field<DispatcherTimer>(mini, "placement").IsEnabled, "Mini timer polling survives disposal");
                 Check(Field<IntPtr>(mini, "foregroundHook") == IntPtr.Zero, "Mini timer foreground hook survives disposal");
@@ -655,6 +659,8 @@ namespace SleepTimer
                         Check(Program.Version == "1.3", "Release version is not 1.3");
                         Check(((FrameworkElement)visual.Content).ActualHeight >= 508, "Client area clips the footer");
                         Console.WriteLine("CHECK: font families and weights");
+                        Check(!((Lazy<AppFont[]>)typeof(AppFonts).GetField("catalog", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null)).IsValueCreated,
+                            "Default startup eagerly loaded the font catalog");
                         Check(AppFonts.All.Length >= 6 && AppFonts.All.Select(font => font.Key).Distinct().Count() == AppFonts.All.Length,
                             "Font choices are missing or duplicate");
                         var installed = Fonts.SystemFontFamilies.Select(font => font.Source).ToArray();

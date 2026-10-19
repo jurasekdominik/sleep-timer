@@ -193,10 +193,13 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
         return host->update(view) ? 1 : 0;
     }
     case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
-    case WM_LBUTTONDBLCLK: host->suppressRelease = true; host->input(taskbar::Command::open); return 0;
+    case WM_LBUTTONDBLCLK:
+        host->suppressRelease = host->clickPending;
+        if (host->suppressRelease) host->input(taskbar::Command::open);
+        return 0;
     case WM_LBUTTONUP:
         if (host->suppressRelease) host->suppressRelease = false;
-        else { host->clickPending = true; SetTimer(window, taskbar::clickTimer, GetDoubleClickTime(), nullptr); }
+        else { host->clickPending = true; SetTimer(window, taskbar::clickTimer, std::min(250u, GetDoubleClickTime()), nullptr); }
         return 0;
     case WM_RBUTTONUP: host->input(taskbar::Command::cancel); return 0;
     case WM_MBUTTONUP: host->input(taskbar::Command::menu); return 0;

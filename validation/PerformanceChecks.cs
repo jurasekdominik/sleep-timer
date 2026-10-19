@@ -185,7 +185,7 @@ namespace SleepTimer
             await Measure(window, "adjusting_running_window_widget", 20, baseline, output, true);
         }
 
-        static async Task Run(MainWindow window, bool baseline, bool adjustmentsOnly, string output)
+        static async Task Run(MainWindow window, bool baseline, bool adjustmentsOnly, bool memoryOnly, string output)
         {
             File.WriteAllText(output, "phase,seconds,cpu_one_core_percent,cpu_machine_percent,working_min_mib,working_max_mib,private_min_mib,private_max_mib,managed_min_mib,managed_max_mib,gdi_before,gdi_after,handles_before,handles_after,widget_visible,placement_mode,renderer,helper_cpu_one_core_percent,helper_working_max_mib,adjustments\n");
             Console.WriteLine("PERF environment: " + Environment.OSVersion + "; CLR " + Environment.Version + "; logical processors " + Environment.ProcessorCount);
@@ -195,6 +195,14 @@ namespace SleepTimer
                 await Adjustments(window, baseline, output); return;
             }
             await Measure(window, "idle_tray", 30, baseline, output);
+            if (memoryOnly)
+            {
+                window.ShowWindow();
+                await Measure(window, "idle_window", 10, baseline, output);
+                window.Hide();
+                await Measure(window, "idle_tray_after_window", 10, baseline, output);
+                return;
+            }
             bool supportsWidget = window.GetType().GetMethod("SetTaskbarTimer", Fields) != null;
             if (supportsWidget)
             {
@@ -224,13 +232,15 @@ namespace SleepTimer
                     Settings.Set("native_taskbar", nativeRequested);
                     Settings.Set("clock_mode", false); Settings.Set("duration", 86400); // Never reaches expiry in this check.
                     Settings.Set("hotkey_toggle_key", 0); Settings.Set("hotkey_quick_key", 0);
+                    Settings.Set("timer_font", "segoe"); Settings.Set("ui_font", "segoe");
+                    Settings.Set("timer_font_weight", 400); Settings.Set("ui_font_weight", 400);
                     var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                     Theme.Init(app);
                     var window = new MainWindow(); app.MainWindow = window;
                     int result = 0;
                     app.Dispatcher.BeginInvoke((Action)(async () =>
                     {
-                        try { await Run(window, baseline, args.Contains("--adjustments-only"), output); }
+                        try { await Run(window, baseline, args.Contains("--adjustments-only"), args.Contains("--memory-only"), output); }
                         catch (Exception error) { Console.WriteLine("::error::" + error); result = 1; }
                         finally
                         {
