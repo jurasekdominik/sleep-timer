@@ -58,9 +58,14 @@ namespace SleepTimer
         {
             var area = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
             using (var form = new System.Windows.Forms.Form { Text = "Menu dismissal test peer", ShowInTaskbar = false,
-                StartPosition = System.Windows.Forms.FormStartPosition.Manual, Location = new Point(area.Right - 300, area.Top + 40), Size = new Size(280, 180) })
+                FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+                StartPosition = System.Windows.Forms.FormStartPosition.Manual, Location = area.Location, Size = area.Size })
             {
-                form.Shown += (s, e) => File.WriteAllText(report, form.Handle.ToInt64().ToString("X"));
+                form.Shown += (s, e) =>
+                {
+                    File.WriteAllText(report + ".tmp", form.Handle.ToInt64().ToString("X"));
+                    File.Move(report + ".tmp", report);
+                };
                 System.Windows.Forms.Application.Run(form);
             }
             return 0;
@@ -79,9 +84,6 @@ namespace SleepTimer
             Console.WriteLine("CHECK: native menu activation and real outside-click dismissal");
             var area = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
             var target = new Rectangle(area.Left + 80, area.Bottom - 84, 140, 34);
-            var parent = CreateWindowEx(0, "STATIC", "Native menu test surface", 0x92000004,
-                area.Left + 64, area.Bottom - 100, 420, 80, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
-            Check(parent != IntPtr.Zero, "Could not create native menu parent");
             string report = Path.Combine(Path.GetTempPath(), "sleep-timer-menu-" + Guid.NewGuid().ToString("N") + ".txt");
             var menu = Field<PopupMenu>(app, "trayMenu");
             bool visible = app.IsVisible;
@@ -90,14 +92,15 @@ namespace SleepTimer
             {
                 using (var peer = Process.Start(new ProcessStartInfo(Assembly.GetExecutingAssembly().Location,
                     "--menu-peer \"" + report + "\"") { UseShellExecute = false, CreateNoWindow = true }))
-                using (var widget = new TaskbarTimer(Field<Action>(callbacks, "toggle"), Field<Action>(callbacks, "cancel"),
-                    Field<Action>(callbacks, "menu"), Field<Action<int, ModifierKeys>>(callbacks, "scroll"),
-                    (width, height) => target, bounds => true, Field<Action>(callbacks, "open"), preferNative: true, nativeParent: parent))
                 {
                     try
                     {
                         Until(() => File.Exists(report), pump, "Menu test peer did not start");
                         var other = new IntPtr(long.Parse(File.ReadAllText(report), System.Globalization.NumberStyles.HexNumber));
+                        // Like Explorer, the widget's parent belongs to a different process from WPF.
+                        using var widget = new TaskbarTimer(Field<Action>(callbacks, "toggle"), Field<Action>(callbacks, "cancel"),
+                            Field<Action>(callbacks, "menu"), Field<Action<int, ModifierKeys>>(callbacks, "scroll"),
+                            (width, height) => target, bounds => true, Field<Action>(callbacks, "open"), preferNative: true, nativeParent: other);
                         widget.Update("1:00:00", "Sleep", TimerState.Idle, 1, TimerTone.Idle);
                         Until(() => widget.RendererDescription == "Native", pump, "Menu test native component did not attach");
                         app.Hide();
@@ -134,7 +137,7 @@ namespace SleepTimer
             }
             finally
             {
-                DestroyWindow(parent); File.Delete(report); SetCursorPos(pointer.X, pointer.Y);
+                File.Delete(report); SetCursorPos(pointer.X, pointer.Y);
                 if (visible) app.ShowWindow();
             }
         }
