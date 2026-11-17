@@ -21,7 +21,7 @@ Get portable `SleepTimer.exe` from [Releases](https://github.com/jurasekdominik/
 - Global keybinds for Start / Cancel and the last quick timer.
 - Separate timer and UI fonts, with font weight selection.
 - Timer status in the title bar and progress in the taskbar icon.
-- Optional native mini timer beside the hidden-icons arrow on the taskbar.
+- Optional native mini timer beside the Windows Start button on the taskbar.
 
 ## Use
 
@@ -38,7 +38,7 @@ Choose an action, set a duration or a clock time, and click the circle to start.
 
 Keep awake prevents automatic sleep, with an option to keep the screen on. Right-click the tray icon for quick timers and keep-awake options. Add your own timer presets in Settings using whole minutes (`90`) or hours (`2h`).
 
-Enable the mini timer in Settings → General → Taskbar timer. Click it to start, pause or resume; double-click to open the app, right-click to cancel (or open the menu when idle), middle-click for the menu, and scroll to adjust. It follows taskbar visibility and hides behind fullscreen apps or when there is no room. Compatible WPF rendering may also hide behind Start and screen clipping.
+Enable the mini timer in Settings → General → Taskbar timer. It sits just left of the Windows Start button. Click it to start, pause or resume; double-click to open the app, right-click to cancel (or open the menu when idle), middle-click for the menu, and scroll to adjust. It follows taskbar visibility and hides behind fullscreen apps or when there is no room to the left of Start. Compatible WPF rendering may also hide behind Start and screen clipping.
 
 The mini timer attaches to the taskbar, including while Start is open. It uses a small helper process and falls back to WPF if unavailable. Choose Compatible (WPF) from its dropdown to switch rendering.
 

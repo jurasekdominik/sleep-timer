@@ -44,9 +44,13 @@ namespace SleepTimer
         {
             var bar = FindWindow("Shell_TrayWnd", null);
             if (bar == IntPtr.Zero || !GetWindowRect(bar, out var bounds)) return "";
-            var tray = FindWindowEx(bar, IntPtr.Zero, "TrayNotifyWnd", null);
-            GetWindowRect(tray, out var notification);
-            return bar + ":" + bounds.Value + ":" + notification.Value + ":" + GetDpiForWindow(bar);
+            var start = FindWindowEx(bar, IntPtr.Zero, "Start", null);
+            GetWindowRect(start, out var startBounds);
+            // Modern Start is an accessibility element. The native task-list geometry
+            // also changes as centered buttons move, without querying accessibility here.
+            var taskList = FindWindowEx(bar, IntPtr.Zero, "ReBarWindow32", null);
+            GetWindowRect(taskList, out var taskListBounds);
+            return bar + ":" + bounds.Value + ":" + startBounds.Value + ":" + taskListBounds.Value + ":" + GetDpiForWindow(bar);
         }
 
         // Called on a worker thread: Explorer's accessibility provider can be slow or unavailable.
@@ -64,33 +68,26 @@ namespace SleepTimer
                     new OrCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
                         new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)));
                 var occupied = new List<Rectangle>();
-                Rectangle? overflow = null;
+                Rectangle? anchor = null;
                 foreach (AutomationElement button in buttons)
                 {
                     var current = button.Current;
                     if (current.IsOffscreen || current.BoundingRectangle.IsEmpty) continue;
                     var bounds = Pixels(current.BoundingRectangle);
                     occupied.Add(bounds);
-                    // Locale-independent Windows 11 overflow-button identifier.
-                    if (current.AutomationId == "SystemTray.OverflowButton" || current.ClassName == "SystemTray.OverflowButton") overflow = bounds;
+                    // Identify Start independently of the Windows display language.
+                    if (current.AutomationId == "StartButton" || current.ClassName == "Start") anchor = bounds;
                 }
-                // Use one consistent outer notification-area edge. Switching between a
-                // transient chevron and its parent caused jumps when the DND bell appeared.
-                Rectangle? anchor = null;
-                var tray = FindWindowEx(bar, IntPtr.Zero, "TrayNotifyWnd", null);
-                if (tray != IntPtr.Zero && GetWindowRect(tray, out var trayRect) && trayRect.Value.Width > 0)
-                    anchor = trayRect.Value;
-                else
+                if (!anchor.HasValue)
                 {
-                    var frame = root.FindFirst(TreeScope.Descendants,
-                        new PropertyCondition(AutomationElement.ClassNameProperty, "SystemTray.SystemTrayFrame"));
-                    if (frame != null && !frame.Current.IsOffscreen && !frame.Current.BoundingRectangle.IsEmpty)
-                        anchor = Pixels(frame.Current.BoundingRectangle);
+                    var start = FindWindowEx(bar, IntPtr.Zero, "Start", null);
+                    if (start != IntPtr.Zero && IsWindowVisible(start) && GetWindowRect(start, out var startRect)
+                        && startRect.Value.Width > 0 && startRect.Value.Height > 0)
+                        anchor = startRect.Value;
                 }
-                if (!anchor.HasValue) anchor = overflow;
                 if (!anchor.HasValue) return null;
                 double scale = Math.Max(96, GetDpiForWindow(bar)) / 96d;
-                return TaskbarPlacement.LeftOfTray(rect.Value, info.Bounds.Value, anchor.Value,
+                return TaskbarPlacement.LeftOfStart(rect.Value, info.Bounds.Value, anchor.Value,
                     (int)Math.Ceiling(logicalWidth * scale), (int)Math.Ceiling(logicalHeight * scale),
                     (int)Math.Ceiling(4 * scale), occupied);
             }

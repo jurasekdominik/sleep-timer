@@ -1,3 +1,9 @@
+# Sleep Timer 1.3.1
+
+- Anchor the taskbar timer just left of the Windows Start button.
+- Follow Start as centered taskbar icons move, while avoiding other controls.
+- Include the native taskbar widget in the portable executable, with WPF fallback.
+
 # Sleep Timer 1.3
 
 - Native taskbar timer that stays visible with Start open.

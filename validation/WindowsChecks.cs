@@ -270,13 +270,13 @@ namespace SleepTimer
                 Check(!mini.IsVisible, "Covered taskbar must hide the timer without waiting for accessibility polling");
                 System.Threading.Volatile.Write(ref shifted, 32);
                 System.Threading.Volatile.Write(ref covered, 0); Call(mini, "RefreshTaskbarLayer");
-                Check(!mini.IsVisible, "Returning from a game must not flash at the stale pre-DND position");
+                Check(!mini.IsVisible, "Returning from a game must not flash at the stale Start-button position");
                 Call(mini, "QueueForegroundRefresh"); Pump(100);
-                Check(!mini.IsVisible, "Notification-area layout must settle before showing the timer");
+                Check(!mini.IsVisible, "Start-button layout must settle before showing the timer");
                 try
                 {
                     PumpUntil(() => mini.IsVisible && GetWindowRect(new WindowInteropHelper(mini).Handle, out var settled)
-                        && settled.Left == target.Left - 32, 4000, "Timer did not return at the settled notification-area edge");
+                        && settled.Left == target.Left - 32, 4000, "Timer did not return at the settled Start-button edge");
                 }
                 catch
                 {
@@ -683,7 +683,7 @@ namespace SleepTimer
                         Check(visual.Title == Field<TimerFace>(visual, "face").Time, "Hidden thumbnail title is not compact");
                         visual.Show(); countdown.Reset(); Call(visual, "UpdateView", false); Pump(50);
                         Check(visual.Title.Contains("Ready"), "Ready state missing from visible title");
-                        Check(Program.Version == "1.3", "Release version is not 1.3");
+                        Check(Program.Version == "1.3.1", "Release version is not 1.3.1");
                         Check(((FrameworkElement)visual.Content).ActualHeight >= 508, "Client area clips the footer");
                         Console.WriteLine("CHECK: font families and weights");
                         Check(!((Lazy<AppFont[]>)typeof(AppFonts).GetField("catalog", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null)).IsValueCreated,

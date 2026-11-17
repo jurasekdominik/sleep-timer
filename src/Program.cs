@@ -7,15 +7,15 @@ using System.Windows;
 [assembly: AssemblyProduct("Sleep Timer")]
 [assembly: AssemblyDescription("Sleep Timer - WPF edition")]
 [assembly: AssemblyCopyright("Dominik Jurásek")]
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.3.1.0")]
+[assembly: AssemblyFileVersion("1.3.1.0")]
 
 namespace SleepTimer
 {
     static class Program
     {
         public const string TrayArg = "--tray";
-        public static readonly string Version = typeof(Program).Assembly.GetName().Version.ToString(2);
+        public static readonly string Version = typeof(Program).Assembly.GetName().Version.ToString(3);
         [STAThread] static void Main(string[] args)
         {
             try { Native.SetDllDirectory(""); } catch { }
